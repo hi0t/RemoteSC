@@ -1,27 +1,90 @@
-#include "pkcs11.h"
+#include "http.h"
 #include "utils.h"
 
+#include <stdlib.h>
+#include <string.h>
+
+#define DEFAULT_ADDR "127.0.0.1:44555"
+
+#define INVOKE(args, ret) http_invoke(client, __func__, args, ret)
+#define FILL_STRING_BY_JSON(json, str)                     \
+    do {                                                   \
+        cJSON *j = json;                                   \
+        if (cJSON_IsString(j)) {                           \
+            padded_copy(str, j->valuestring, sizeof(str)); \
+        } else {                                           \
+            memset(str, ' ', sizeof(str));                 \
+        }                                                  \
+    } while (0)
+#define FILL_INT_BY_JSON(json, val)                                \
+    do {                                                           \
+        cJSON *j = json;                                           \
+        val = cJSON_IsNumber(j) ? (typeof(val))j->valuedouble : 0; \
+    } while (0)
+#define FILL_VERSION_BY_JSON(json, ver)                                 \
+    do {                                                                \
+        cJSON *j = json;                                                \
+        if (cJSON_IsObject(j)) {                                        \
+            cJSON *major = cJSON_GetObjectItem(j, "major");             \
+            cJSON *minor = cJSON_GetObjectItem(j, "minor");             \
+            ver.major = cJSON_IsNumber(major) ? major->valuedouble : 0; \
+            ver.minor = cJSON_IsNumber(minor) ? minor->valuedouble : 0; \
+        } else {                                                        \
+            ver.major = 0;                                              \
+            ver.minor = 0;                                              \
+        }                                                               \
+    } while (0)
+
 static CK_FUNCTION_LIST function_list;
+static struct http *client;
 
 CK_RV C_Initialize(CK_VOID_PTR pInitArgs)
 {
+#ifdef NDEBUG
+    __rsc_dbg = getenv("REMOTESC_DBG") ? true : false;
+#else
+    __rsc_dbg = true;
+#endif
     UNUSED(pInitArgs);
 
-    return CKR_OK;
+    const char *addr = getenv("REMOTESC_ADDR");
+    if (addr == NULL) {
+        addr = DEFAULT_ADDR;
+    }
+
+    client = http_init(addr);
+    if (client == NULL) {
+        return CKR_FUNCTION_FAILED;
+    }
+    return INVOKE(NULL, NULL);
 }
 
 CK_RV C_Finalize(CK_VOID_PTR pReserved)
 {
     UNUSED(pReserved);
 
-    return CKR_OK;
+    CK_RV rv = INVOKE(NULL, NULL);
+    http_cleanup(client);
+    return rv;
 }
 
 CK_RV C_GetInfo(CK_INFO_PTR pInfo)
 {
-    UNUSED(pInfo);
+    cJSON *ret = NULL;
+    CK_RV rv;
 
-    return CKR_OK;
+    if ((rv = INVOKE(NULL, &ret)) != CKR_OK) {
+        return rv;
+    }
+
+    FILL_VERSION_BY_JSON(cJSON_GetObjectItem(ret, "cryptokiVersion"), pInfo->cryptokiVersion);
+    FILL_STRING_BY_JSON(cJSON_GetObjectItem(ret, "manufacturerID"), pInfo->manufacturerID);
+    FILL_INT_BY_JSON(cJSON_GetObjectItem(ret, "flags"), pInfo->flags);
+    FILL_STRING_BY_JSON(cJSON_GetObjectItem(ret, "libraryDescription"), pInfo->libraryDescription);
+    FILL_VERSION_BY_JSON(cJSON_GetObjectItem(ret, "libraryVersion"), pInfo->libraryVersion);
+    cJSON_Delete(ret);
+
+    return rv;
 }
 
 CK_RV C_GetFunctionList(CK_FUNCTION_LIST_PTR_PTR ppFunctionList)

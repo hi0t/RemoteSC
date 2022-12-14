@@ -2,6 +2,7 @@
 
 #include <stdarg.h>
 #include <stdio.h>
+#include <string.h>
 
 bool __rsc_dbg = false;
 
@@ -16,4 +17,15 @@ void debug(const char *func, int line, const char *fmt, ...)
     vfprintf(stderr, fmt, args);
     va_end(args);
     fprintf(stderr, "\n");
+}
+
+void padded_copy(unsigned char *dst, const char *src, size_t dst_size)
+{
+    memset(dst, ' ', dst_size);
+    size_t src_len = strlen(src);
+    if (src_len > dst_size) {
+        memcpy(dst, src, dst_size);
+    } else {
+        memcpy(dst, src, src_len);
+    }
 }
