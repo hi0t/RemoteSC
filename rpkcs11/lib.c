@@ -6,8 +6,10 @@
 #include <string.h>
 
 #define DEFAULT_ADDR "127.0.0.1:44555"
+#define MAX_CRYPTO_OBJ_SIZE 4096
 
-#define INVOKE(args, ret) http_invoke(client, __func__, args, ret)
+#define INVOKE(args, ret) http_invoke(client, __func__, args, ret, false)
+#define INVOKE_SAFE(args, ret) http_invoke(client, __func__, args, ret, true)
 #define FILL_STRING_BY_JSON(json, key, str)                             \
     do {                                                                \
         json_object *j = json;                                          \
@@ -361,13 +363,16 @@ CK_RV C_Login(CK_SESSION_HANDLE hSession, CK_USER_TYPE userType, CK_UTF8CHAR_PTR
 {
     json_object *args = NULL;
     CK_RV rv;
+    json_object *pin = json_object_new_string_len((char *)pPin, ulPinLen);
 
     args = json_object_new_array();
     json_object_array_add(args, json_object_new_uint64(hSession));
     json_object_array_add(args, json_object_new_uint64(userType));
-    json_object_array_add(args, json_object_new_string_len((char *)pPin, ulPinLen));
+    json_object_array_add(args, pin);
 
-    rv = INVOKE(args, NULL);
+    rv = INVOKE_SAFE(args, NULL);
+
+    memset((char *)json_object_get_string(pin), '*', json_object_get_string_len(pin));
     json_object_put(args);
     return rv;
 }
@@ -458,7 +463,7 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject, 
 
     size_t len = json_object_array_length(ret);
     for (size_t i = 0; i < len; i++) {
-        CK_ULONG new_len;
+        CK_ULONG new_len, dummy;
         json_object *str;
 
         json_object *tmp = json_object_array_get_idx(ret, i);
@@ -470,15 +475,16 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject, 
             pTemplate[i].ulValueLen = new_len;
             continue;
         }
-        if (pTemplate[i].ulValueLen != new_len) {
+        if (new_len > pTemplate[i].ulValueLen) {
             continue;
         }
-        if (mbedtls_base64_decode(pTemplate[i].pValue, pTemplate[i].ulValueLen, &new_len,
-                (unsigned char *)json_object_get_string(str), json_object_get_string_len(str))
-            != 0) {
-            DBG("buffer too small");
-            continue;
-        }
+        mbedtls_base64_decode(
+            pTemplate[i].pValue,
+            pTemplate[i].ulValueLen,
+            &dummy,
+            (unsigned char *)json_object_get_string(str),
+            json_object_get_string_len(str));
+        pTemplate[i].ulValueLen = new_len;
     }
 out:
     json_object_put(args);
@@ -500,7 +506,7 @@ CK_RV C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, 
 {
     json_object *args = NULL;
     CK_RV rv;
-    char buf[4096];
+    char buf[MAX_CRYPTO_OBJ_SIZE];
     size_t str_len;
 
     if (ulCount != 0 && pTemplate == NULL) {
@@ -515,7 +521,8 @@ CK_RV C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, 
     for (CK_ULONG i = 0; i < ulCount; i++) {
         if (mbedtls_base64_encode((unsigned char *)buf, sizeof(buf), &str_len, pTemplate[i].pValue, pTemplate[i].ulValueLen) != 0) {
             DBG("buffer too small");
-            continue;
+            rv = CKR_FUNCTION_FAILED;
+            goto out;
         }
         json_object *tmp = json_object_new_object();
         json_object_object_add(tmp, "type", json_object_new_uint64(pTemplate[i].type));
@@ -525,7 +532,7 @@ CK_RV C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, 
     }
 
     rv = INVOKE(args, NULL);
-
+out:
     json_object_put(args);
     return rv;
 }
@@ -699,40 +706,143 @@ CK_RV C_DigestFinal(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pDigest, CK_ULONG_PT
 
 CK_RV C_SignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJECT_HANDLE hKey)
 {
-    UNUSED(hSession);
-    UNUSED(pMechanism);
-    UNUSED(hKey);
-    DBG("%s not supported", __func__);
-    return CKR_FUNCTION_NOT_SUPPORTED;
+    json_object *args = NULL;
+    char buf[MAX_CRYPTO_OBJ_SIZE];
+    size_t str_len;
+    CK_RV rv;
+
+    if (pMechanism == NULL) {
+        return CKR_ARGUMENTS_BAD;
+    }
+
+    json_object *mech = json_object_new_object();
+    args = json_object_new_array();
+    json_object_array_add(args, json_object_new_uint64(hSession));
+    json_object_array_add(args, mech);
+    json_object_array_add(args, json_object_new_uint64(hKey));
+
+    json_object_object_add(mech, "mechanism", json_object_new_uint64(pMechanism->mechanism));
+    if (mbedtls_base64_encode((unsigned char *)buf, sizeof(buf), &str_len, pMechanism->pParameter, pMechanism->ulParameterLen) != 0) {
+        DBG("buffer too small");
+        rv = CKR_FUNCTION_FAILED;
+        goto out;
+    } else {
+        json_object_object_add(mech, "parameter", json_object_new_string_len(buf, str_len));
+    }
+
+    rv = INVOKE(args, NULL);
+out:
+    json_object_put(args);
+    return rv;
 }
 
 CK_RV C_Sign(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG ulDataLen, CK_BYTE_PTR pSignature, CK_ULONG_PTR pulSignatureLen)
 {
-    UNUSED(hSession);
-    UNUSED(pData);
-    UNUSED(ulDataLen);
-    UNUSED(pSignature);
-    UNUSED(pulSignatureLen);
-    DBG("%s not supported", __func__);
-    return CKR_FUNCTION_NOT_SUPPORTED;
+    json_object *args = NULL, *ret = NULL, *str;
+    char buf[MAX_CRYPTO_OBJ_SIZE];
+    size_t str_len;
+    CK_ULONG new_len, dummy;
+    CK_RV rv;
+
+    if (mbedtls_base64_encode((unsigned char *)buf, sizeof(buf), &str_len, pData, ulDataLen) != 0) {
+        DBG("buffer too small");
+        rv = CKR_FUNCTION_FAILED;
+        goto out;
+    }
+
+    args = json_object_new_array();
+    json_object_array_add(args, json_object_new_uint64(hSession));
+    json_object_array_add(args, json_object_new_string_len(buf, str_len));
+    json_object_array_add(args, json_object_new_uint64(*pulSignatureLen));
+
+    rv = INVOKE(args, &ret);
+
+    FILL_INT_BY_JSON(ret, "signLen", new_len);
+
+    // just request length
+    if (!json_object_object_get_ex(ret, "sign", &str)) {
+        *pulSignatureLen = new_len;
+        goto out;
+    }
+    if (new_len > *pulSignatureLen) {
+        rv = CKR_BUFFER_TOO_SMALL;
+        goto out;
+    }
+    if (mbedtls_base64_decode(
+            pSignature,
+            *pulSignatureLen,
+            &dummy,
+            (unsigned char *)json_object_get_string(str),
+            json_object_get_string_len(str))
+        != 0) {
+        rv = CKR_BUFFER_TOO_SMALL;
+    }
+    *pulSignatureLen = new_len;
+out:
+    json_object_put(args);
+    json_object_put(ret);
+    return rv;
 }
 
 CK_RV C_SignUpdate(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pPart, CK_ULONG ulPartLen)
 {
-    UNUSED(hSession);
-    UNUSED(pPart);
-    UNUSED(ulPartLen);
-    DBG("%s not supported", __func__);
-    return CKR_FUNCTION_NOT_SUPPORTED;
+    json_object *args = NULL;
+    char buf[MAX_CRYPTO_OBJ_SIZE];
+    size_t str_len;
+    CK_RV rv;
+
+    if (mbedtls_base64_encode((unsigned char *)buf, sizeof(buf), &str_len, pPart, ulPartLen) != 0) {
+        DBG("buffer too small");
+        rv = CKR_FUNCTION_FAILED;
+        goto out;
+    }
+
+    args = json_object_new_array();
+    json_object_array_add(args, json_object_new_uint64(hSession));
+    json_object_array_add(args, json_object_new_string_len(buf, str_len));
+
+    rv = INVOKE(args, NULL);
+out:
+    json_object_put(args);
+    return rv;
 }
 
 CK_RV C_SignFinal(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pSignature, CK_ULONG_PTR pulSignatureLen)
 {
-    UNUSED(hSession);
-    UNUSED(pSignature);
-    UNUSED(pulSignatureLen);
-    DBG("%s not supported", __func__);
-    return CKR_FUNCTION_NOT_SUPPORTED;
+    json_object *args = NULL, *ret = NULL, *str;
+    CK_ULONG new_len, dummy;
+    CK_RV rv;
+
+    args = json_object_new_array();
+    json_object_array_add(args, json_object_new_uint64(hSession));
+
+    rv = INVOKE(args, &ret);
+
+    FILL_INT_BY_JSON(ret, "signLen", new_len);
+
+    // just request length
+    if (!json_object_object_get_ex(ret, "sign", &str)) {
+        *pulSignatureLen = new_len;
+        goto out;
+    }
+    if (new_len > *pulSignatureLen) {
+        rv = CKR_BUFFER_TOO_SMALL;
+        goto out;
+    }
+    if (mbedtls_base64_decode(
+            pSignature,
+            *pulSignatureLen,
+            &dummy,
+            (unsigned char *)json_object_get_string(str),
+            json_object_get_string_len(str))
+        != 0) {
+        rv = CKR_BUFFER_TOO_SMALL;
+    }
+    *pulSignatureLen = new_len;
+out:
+    json_object_put(args);
+    json_object_put(ret);
+    return rv;
 }
 
 CK_RV C_SignRecoverInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJECT_HANDLE hKey)

@@ -75,6 +75,16 @@ type ckAttribute struct {
 	ValueLen uint   `json:"valueLen"`
 }
 
+type ckMechanism struct {
+	Mechanism uint   `json:"mechanism"`
+	Parameter []byte `json:"parameter"`
+}
+
+type ckSignData struct {
+	Sign    []byte `json:"sign,omitempty"`
+	SignLen uint   `json:"signLen"`
+}
+
 func (e pkcs11_err) Error() string {
 	return fmt.Sprintf("pkcs11 error: 0x%X", uint(e))
 }
@@ -98,9 +108,6 @@ func wrapBool(x bool) C.CK_BBOOL {
 }
 
 func wrapAttributeArr(arr []ckAttribute) (func(), C.CK_ATTRIBUTE_PTR, C.CK_ULONG) {
-	if len(arr) == 0 {
-		return func() {}, nil, 0
-	}
 	pArr := make([]C.CK_ATTRIBUTE, len(arr))
 	ptrs := make([]unsafe.Pointer, len(arr))
 	for i, a := range arr {

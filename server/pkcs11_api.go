@@ -127,6 +127,16 @@ func (c *pkcs11_ctx) CloseAllSessions(slotID uint) error {
 	return wrapError(C.rsc_CloseAllSessions(c.ctx, C.CK_SLOT_ID(slotID)))
 }
 
+func (c *pkcs11_ctx) Login(sess ckSessionHandle, userType uint, pin string) error {
+	cpin := C.CString(pin)
+	defer C.free(unsafe.Pointer(cpin))
+	return wrapError(C.rsc_Login(c.ctx, C.CK_SESSION_HANDLE(sess), C.CK_USER_TYPE(userType), cpin, C.CK_ULONG(len(pin))))
+}
+
+func (c *pkcs11_ctx) Logout(sess ckSessionHandle) error {
+	return wrapError(C.rsc_Logout(c.ctx, C.CK_SESSION_HANDLE(sess)))
+}
+
 func (c *pkcs11_ctx) GetAttributeValue(sess ckSessionHandle, obj ckObjectHandle, attr []ckAttribute) ([]ckAttribute, error) {
 	cattr := make([]C.CK_ATTRIBUTE, len(attr))
 	for i, a := range attr {
@@ -180,11 +190,47 @@ func (c *pkcs11_ctx) FindObjectsFinal(sess ckSessionHandle) error {
 	return wrapError(C.rsc_FindObjectsFinal(c.ctx, C.CK_SESSION_HANDLE(sess)))
 }
 
-func (c *pkcs11_ctx) Login(sess ckSessionHandle, userType uint, pin string) error {
-	cpin := C.CString(pin)
-	defer C.free(unsafe.Pointer(cpin))
-	return wrapError(C.rsc_Login(c.ctx, C.CK_SESSION_HANDLE(sess), C.CK_USER_TYPE(userType), cpin, C.CK_ULONG(len(pin))))
+func (c *pkcs11_ctx) SignInit(sess ckSessionHandle, mech ckMechanism, key ckObjectHandle) error {
+	cmech := &C.CK_MECHANISM{
+		mechanism:      C.CK_MECHANISM_TYPE(mech.Mechanism),
+		pParameter:     C.CBytes(mech.Parameter),
+		ulParameterLen: C.CK_ULONG(len(mech.Parameter)),
+	}
+	defer C.free(cmech.pParameter)
+	return wrapError(C.rsc_SignInit(c.ctx, C.CK_SESSION_HANDLE(sess), cmech, C.CK_OBJECT_HANDLE(key)))
 }
-func (c *pkcs11_ctx) Logout(sess ckSessionHandle) error {
-	return wrapError(C.rsc_Logout(c.ctx, C.CK_SESSION_HANDLE(sess)))
+
+func (c *pkcs11_ctx) Sign(sess ckSessionHandle, msg []byte, signLen uint) (ckSignData, error) {
+	var sign unsafe.Pointer
+	cSignLen := C.CK_ULONG(signLen)
+
+	cmsg := C.CBytes(msg)
+	defer C.free(cmsg)
+
+	if signLen > 0 {
+		sign = C.malloc(C.CK_ULONG(signLen))
+		defer C.free(sign)
+	}
+	rv := C.rsc_Sign(c.ctx, C.CK_SESSION_HANDLE(sess), C.CK_BYTE_PTR(cmsg), C.CK_ULONG(len(msg)), C.CK_BYTE_PTR(sign), &cSignLen)
+
+	return ckSignData{Sign: C.GoBytes(sign, C.int(cSignLen)), SignLen: uint(cSignLen)}, wrapError(rv)
+}
+
+func (c *pkcs11_ctx) SignUpdate(sess ckSessionHandle, msg []byte) error {
+	cmsg := C.CBytes(msg)
+	defer C.free(cmsg)
+	return wrapError(C.rsc_SignUpdate(c.ctx, C.CK_SESSION_HANDLE(sess), C.CK_BYTE_PTR(cmsg), C.CK_ULONG(len(msg))))
+}
+
+func (c *pkcs11_ctx) SignFinal(sess ckSessionHandle, signLen uint) (ckSignData, error) {
+	var sign unsafe.Pointer
+	cSignLen := C.CK_ULONG(signLen)
+
+	if signLen > 0 {
+		sign = C.malloc(C.CK_ULONG(signLen))
+		defer C.free(sign)
+	}
+	rv := C.rsc_SignFinal(c.ctx, C.CK_SESSION_HANDLE(sess), C.CK_BYTE_PTR(sign), &cSignLen)
+
+	return ckSignData{Sign: C.GoBytes(sign, C.int(cSignLen)), SignLen: uint(cSignLen)}, wrapError(rv)
 }

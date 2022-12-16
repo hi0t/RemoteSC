@@ -53,7 +53,7 @@ void http_cleanup(struct http *h)
     free(h);
 }
 
-CK_RV http_invoke(struct http *h, const char *method, json_object *args, json_object **ret)
+CK_RV http_invoke(struct http *h, const char *method, json_object *args, json_object **ret, bool sanitize)
 {
     struct curl_resp raw_resp = { 0 };
     char curl_errbuf[CURL_ERROR_SIZE];
@@ -69,13 +69,19 @@ CK_RV http_invoke(struct http *h, const char *method, json_object *args, json_ob
     json_object_object_add(req, "args", args);
 
     const char *raw_req = json_object_to_json_string_ext(req, JSON_C_TO_STRING_PLAIN);
+    size_t req_len = strlen(raw_req);
     curl_easy_setopt(h->curl, CURLOPT_POSTFIELDS, raw_req);
-    curl_easy_setopt(h->curl, CURLOPT_POSTFIELDSIZE, strlen(raw_req));
+    curl_easy_setopt(h->curl, CURLOPT_POSTFIELDSIZE, req_len);
     curl_easy_setopt(h->curl, CURLOPT_WRITEDATA, &raw_resp);
     curl_easy_setopt(h->curl, CURLOPT_ERRORBUFFER, curl_errbuf);
 
     DBG("req: %s", method);
     CURLcode cerr = curl_easy_perform(h->curl);
+
+    if (sanitize) {
+        memset((char *)raw_req, '*', req_len);
+    }
+
     if (cerr != CURLE_OK) {
         DBG("http err: (%d) %s", cerr, curl_errbuf);
         rv = CKR_FUNCTION_FAILED;

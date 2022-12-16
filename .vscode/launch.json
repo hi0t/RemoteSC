@@ -44,7 +44,7 @@
             "program": "${workspaceFolder}",
             "env": {
                 "REMOTESC_PROVIDER": "/usr/lib/softhsm/libsofthsm2.so",
-                "SOFTHSM2_CONF": ".vscode/softhsm2.conf"
+                "SOFTHSM2_CONF": ".vscode/keys/softhsm2.conf"
             }
         }
     ]

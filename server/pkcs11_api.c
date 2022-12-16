@@ -135,6 +135,18 @@ CK_RV rsc_CloseAllSessions(struct rsc_ctx *ctx, CK_SLOT_ID slotID)
     return ctx->f->C_CloseAllSessions(slotID);
 }
 
+CK_RV rsc_Login(struct rsc_ctx *ctx, CK_SESSION_HANDLE hSession, CK_USER_TYPE userType, char *pPin, CK_ULONG ulPinLen)
+{
+    CK_RV rv = ctx->f->C_Login(hSession, userType, (CK_UTF8CHAR_PTR)pPin, ulPinLen);
+    memset(pPin, '*', ulPinLen);
+    return rv;
+}
+
+CK_RV rsc_Logout(struct rsc_ctx *ctx, CK_SESSION_HANDLE hSession)
+{
+    return ctx->f->C_Logout(hSession);
+}
+
 CK_RV rsc_GetAttributeValue(struct rsc_ctx *ctx, CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject, CK_ATTRIBUTE_PTR pTemplate, CK_ULONG ulCount)
 {
     for (CK_ULONG i = 0; i < ulCount; i++) {
@@ -160,12 +172,22 @@ CK_RV rsc_FindObjectsFinal(struct rsc_ctx *ctx, CK_SESSION_HANDLE hSession)
     return ctx->f->C_FindObjectsFinal(hSession);
 }
 
-CK_RV rsc_Login(struct rsc_ctx *ctx, CK_SESSION_HANDLE hSession, CK_USER_TYPE userType, char *pPin, CK_ULONG ulPinLen)
+CK_RV rsc_SignInit(struct rsc_ctx *ctx, CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJECT_HANDLE hKey)
 {
-    return ctx->f->C_Login(hSession, userType, (CK_UTF8CHAR_PTR)pPin, ulPinLen);
+    return ctx->f->C_SignInit(hSession, pMechanism, hKey);
 }
 
-CK_RV rsc_Logout(struct rsc_ctx *ctx, CK_SESSION_HANDLE hSession)
+CK_RV rsc_Sign(struct rsc_ctx *ctx, CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG ulDataLen, CK_BYTE_PTR pSignature, CK_ULONG_PTR pulSignatureLen)
 {
-    return ctx->f->C_Logout(hSession);
+    return ctx->f->C_Sign(hSession, pData, ulDataLen, pSignature, pulSignatureLen);
+}
+
+CK_RV rsc_SignUpdate(struct rsc_ctx *ctx, CK_SESSION_HANDLE hSession, CK_BYTE_PTR pPart, CK_ULONG ulPartLen)
+{
+    return ctx->f->C_SignUpdate(hSession, pPart, ulPartLen);
+}
+
+CK_RV rsc_SignFinal(struct rsc_ctx *ctx, CK_SESSION_HANDLE hSession, CK_BYTE_PTR pSignature, CK_ULONG_PTR pulSignatureLen)
+{
+    return ctx->f->C_SignFinal(hSession, pSignature, pulSignatureLen);
 }

@@ -34,7 +34,7 @@ func Start(cfg Config) {
 		s := &http.Server{Addr: a, Handler: mux}
 		listeners = append(listeners, s)
 		go func(addr string) {
-			if err := s.ListenAndServe(); err != nil {
+			if err := s.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 				log.Fatalln(err)
 			}
 		}(a)
