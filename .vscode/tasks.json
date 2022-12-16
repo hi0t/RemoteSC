@@ -1,0 +1,21 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "type": "process",
+            "label": "build",
+            "command": "/bin/bash",
+            "args": [
+                "-c",
+                {
+                    "value": "${command:cmake.tasksBuildCommand}",
+                    "quoting": "strong"
+                }
+            ],
+            "group": "build",
+            "problemMatcher": [
+                "$gcc"
+            ],
+        }
+    ]
+}

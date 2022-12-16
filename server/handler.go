@@ -23,7 +23,7 @@ type Req struct {
 
 type Resp struct {
 	Ret            any    `json:"ret,omitempty"`
-	Err            uint   `json:"err"`
+	Err            uint   `json:"err,omitempty"`
 	ErrDescription string `json:"errDescription,omitempty"`
 }
 
@@ -148,10 +148,10 @@ func (h *messageHandler) callMethod(method string, args json.RawMessage) *Resp {
 	}
 
 	if err == nil {
-		return &Resp{Err: CKR_OK, Ret: ret}
+		return &Resp{Ret: ret, Err: CKR_OK}
 	}
 	if perr, ok := err.(*pkcs11_err); ok {
-		return &Resp{Err: uint(*perr), ErrDescription: perr.Error()}
+		return &Resp{Ret: ret, Err: uint(*perr), ErrDescription: perr.Error()}
 	}
 	return &Resp{Err: CKR_FUNCTION_FAILED, ErrDescription: err.Error()}
 }

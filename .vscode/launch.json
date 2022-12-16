@@ -26,8 +26,15 @@
                     "description": "Set Disassembly Flavor to Intel",
                     "text": "-gdb-set disassembly-flavor intel",
                     "ignoreFailures": true
+                },
+                {
+                    "text": "set env SSH_ASKPASS_REQUIRE=force"
+                },
+                {
+                    "text": "set env SSH_ASKPASS=${workspaceFolder}/.vscode/ask-pass.sh"
                 }
-            ]
+            ],
+            "preLaunchTask": "build"
         },
         {
             "name": "server",

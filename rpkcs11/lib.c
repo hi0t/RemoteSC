@@ -1,38 +1,40 @@
 #include "http.h"
 #include "utils.h"
 
+#include <mbedtls/base64.h>
 #include <stdlib.h>
 #include <string.h>
 
 #define DEFAULT_ADDR "127.0.0.1:44555"
 
 #define INVOKE(args, ret) http_invoke(client, __func__, args, ret)
-#define FILL_STRING_BY_JSON(json, str)                     \
-    do {                                                   \
-        cJSON *j = json;                                   \
-        if (cJSON_IsString(j)) {                           \
-            padded_copy(str, j->valuestring, sizeof(str)); \
-        } else {                                           \
-            memset(str, ' ', sizeof(str));                 \
-        }                                                  \
-    } while (0)
-#define FILL_INT_BY_JSON(json, val)                                \
-    do {                                                           \
-        cJSON *j = json;                                           \
-        val = cJSON_IsNumber(j) ? (typeof(val))j->valuedouble : 0; \
-    } while (0)
-#define FILL_VERSION_BY_JSON(json, ver)                                 \
+#define FILL_STRING_BY_JSON(json, key, str)                             \
     do {                                                                \
-        cJSON *j = json;                                                \
-        if (cJSON_IsObject(j)) {                                        \
-            cJSON *major = cJSON_GetObjectItem(j, "major");             \
-            cJSON *minor = cJSON_GetObjectItem(j, "minor");             \
-            ver.major = cJSON_IsNumber(major) ? major->valuedouble : 0; \
-            ver.minor = cJSON_IsNumber(minor) ? minor->valuedouble : 0; \
-        } else {                                                        \
-            ver.major = 0;                                              \
-            ver.minor = 0;                                              \
-        }                                                               \
+        json_object *j = json;                                          \
+        json_object *obj;                                               \
+        if (json_object_object_get_ex(j, key, &obj))                    \
+            padded_copy(str, json_object_get_string(obj), sizeof(str)); \
+        else                                                            \
+            memset(str, ' ', sizeof(str));                              \
+    } while (0)
+#define FILL_INT_BY_JSON(json, key, val)                    \
+    do {                                                    \
+        json_object *j = json;                              \
+        json_object *obj;                                   \
+        val = 0;                                            \
+        if (json_object_object_get_ex(j, key, &obj))        \
+            val = (typeof(val))json_object_get_uint64(obj); \
+    } while (0)
+#define FILL_VERSION_BY_JSON(json, key, ver)           \
+    do {                                               \
+        json_object *j = json;                         \
+        json_object *obj;                              \
+        ver.major = 0;                                 \
+        ver.minor = 0;                                 \
+        if (json_object_object_get_ex(j, key, &obj)) { \
+            FILL_INT_BY_JSON(obj, "major", ver.major); \
+            FILL_INT_BY_JSON(obj, "minor", ver.minor); \
+        }                                              \
     } while (0)
 
 static CK_FUNCTION_LIST function_list;
@@ -70,19 +72,23 @@ CK_RV C_Finalize(CK_VOID_PTR pReserved)
 
 CK_RV C_GetInfo(CK_INFO_PTR pInfo)
 {
-    cJSON *ret = NULL;
+    json_object *ret = NULL;
     CK_RV rv;
+
+    if (pInfo == NULL) {
+        return CKR_ARGUMENTS_BAD;
+    }
 
     if ((rv = INVOKE(NULL, &ret)) != CKR_OK) {
         return rv;
     }
 
-    FILL_VERSION_BY_JSON(cJSON_GetObjectItem(ret, "cryptokiVersion"), pInfo->cryptokiVersion);
-    FILL_STRING_BY_JSON(cJSON_GetObjectItem(ret, "manufacturerID"), pInfo->manufacturerID);
-    FILL_INT_BY_JSON(cJSON_GetObjectItem(ret, "flags"), pInfo->flags);
-    FILL_STRING_BY_JSON(cJSON_GetObjectItem(ret, "libraryDescription"), pInfo->libraryDescription);
-    FILL_VERSION_BY_JSON(cJSON_GetObjectItem(ret, "libraryVersion"), pInfo->libraryVersion);
-    cJSON_Delete(ret);
+    FILL_VERSION_BY_JSON(ret, "cryptokiVersion", pInfo->cryptokiVersion);
+    FILL_STRING_BY_JSON(ret, "manufacturerID", pInfo->manufacturerID);
+    FILL_INT_BY_JSON(ret, "flags", pInfo->flags);
+    FILL_STRING_BY_JSON(ret, "libraryDescription", pInfo->libraryDescription);
+    FILL_VERSION_BY_JSON(ret, "libraryVersion", pInfo->libraryVersion);
+    json_object_put(ret);
 
     return rv;
 }
@@ -98,27 +104,116 @@ CK_RV C_GetFunctionList(CK_FUNCTION_LIST_PTR_PTR ppFunctionList)
 
 CK_RV C_GetSlotList(CK_BBOOL tokenPresent, CK_SLOT_ID_PTR pSlotList, CK_ULONG_PTR pulCount)
 {
-    UNUSED(tokenPresent);
-    UNUSED(pSlotList);
-    UNUSED(pulCount);
-    DBG("%s not supported", __func__);
-    return CKR_FUNCTION_NOT_SUPPORTED;
+    json_object *args = NULL, *ret = NULL;
+    CK_RV rv;
+
+    if (pulCount == NULL) {
+        return CKR_ARGUMENTS_BAD;
+    }
+
+    args = json_object_new_array();
+    json_object_array_add(args, json_object_new_boolean(tokenPresent));
+    if (pSlotList == NULL) {
+        json_object_array_add(args, json_object_new_uint64(0));
+    } else {
+        json_object_array_add(args, json_object_new_uint64(*pulCount));
+    }
+
+    rv = INVOKE(args, &ret);
+
+    if (!json_object_is_type(ret, json_type_object)) {
+        rv = CKR_FUNCTION_FAILED;
+        goto out;
+    }
+
+    json_object *jcnt;
+    if (json_object_object_get_ex(ret, "cnt", &jcnt)) {
+        *pulCount = json_object_get_uint64(jcnt);
+    }
+
+    json_object *list;
+    if (!json_object_object_get_ex(ret, "list", &list)) {
+        goto out;
+    }
+
+    if (pSlotList != NULL) {
+        size_t len = json_object_array_length(list);
+        for (size_t i = 0; i < len; i++) {
+            json_object *id = json_object_array_get_idx(list, i);
+            pSlotList[i] = json_object_get_uint64(id);
+        }
+    }
+out:
+    json_object_put(args);
+    json_object_put(ret);
+    return rv;
 }
 
 CK_RV C_GetSlotInfo(CK_SLOT_ID slotID, CK_SLOT_INFO_PTR pInfo)
 {
-    UNUSED(slotID);
-    UNUSED(pInfo);
-    DBG("%s not supported", __func__);
-    return CKR_FUNCTION_NOT_SUPPORTED;
+    json_object *args = NULL, *ret = NULL;
+    CK_RV rv;
+
+    if (pInfo == NULL) {
+        return CKR_ARGUMENTS_BAD;
+    }
+
+    args = json_object_new_array();
+    json_object_array_add(args, json_object_new_uint64(slotID));
+
+    if ((rv = INVOKE(args, &ret)) != CKR_OK) {
+        goto out;
+    }
+
+    FILL_STRING_BY_JSON(ret, "slotDescription", pInfo->slotDescription);
+    FILL_STRING_BY_JSON(ret, "manufacturerID", pInfo->manufacturerID);
+    FILL_INT_BY_JSON(ret, "flags", pInfo->flags);
+    FILL_VERSION_BY_JSON(ret, "hardwareVersion", pInfo->hardwareVersion);
+    FILL_VERSION_BY_JSON(ret, "firmwareVersion", pInfo->firmwareVersion);
+out:
+    json_object_put(args);
+    json_object_put(ret);
+    return rv;
 }
 
 CK_RV C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo)
 {
-    UNUSED(slotID);
-    UNUSED(pInfo);
-    DBG("%s not supported", __func__);
-    return CKR_FUNCTION_NOT_SUPPORTED;
+    json_object *args = NULL, *ret = NULL;
+    CK_RV rv;
+
+    if (pInfo == NULL) {
+        return CKR_ARGUMENTS_BAD;
+    }
+
+    args = json_object_new_array();
+    json_object_array_add(args, json_object_new_uint64(slotID));
+
+    if ((rv = INVOKE(args, &ret)) != CKR_OK) {
+        goto out;
+    }
+
+    FILL_STRING_BY_JSON(ret, "label", pInfo->label);
+    FILL_STRING_BY_JSON(ret, "manufacturerID", pInfo->manufacturerID);
+    FILL_STRING_BY_JSON(ret, "model", pInfo->model);
+    FILL_STRING_BY_JSON(ret, "serialNumber", pInfo->serialNumber);
+    FILL_INT_BY_JSON(ret, "flags", pInfo->flags);
+    FILL_INT_BY_JSON(ret, "maxSessionCount", pInfo->ulMaxSessionCount);
+    FILL_INT_BY_JSON(ret, "sessionCount", pInfo->ulSessionCount);
+    FILL_INT_BY_JSON(ret, "maxRwSessionCount", pInfo->ulMaxRwSessionCount);
+    FILL_INT_BY_JSON(ret, "rwSessionCount", pInfo->ulRwSessionCount);
+    FILL_INT_BY_JSON(ret, "maxPinLen", pInfo->ulMaxPinLen);
+    FILL_INT_BY_JSON(ret, "minPinLen", pInfo->ulMinPinLen);
+    FILL_INT_BY_JSON(ret, "totalPublicMemory", pInfo->ulTotalPublicMemory);
+    FILL_INT_BY_JSON(ret, "freePublicMemory", pInfo->ulFreePublicMemory);
+    FILL_INT_BY_JSON(ret, "totalPrivateMemory", pInfo->ulTotalPrivateMemory);
+    FILL_INT_BY_JSON(ret, "freePrivateMemory", pInfo->ulFreePrivateMemory);
+    FILL_VERSION_BY_JSON(ret, "hardwareVersion", pInfo->hardwareVersion);
+    FILL_VERSION_BY_JSON(ret, "firmwareVersion", pInfo->firmwareVersion);
+    FILL_STRING_BY_JSON(ret, "utcTime", pInfo->utcTime);
+out:
+    json_object_put(args);
+    json_object_put(ret);
+    return rv;
 }
 
 CK_RV C_WaitForSlotEvent(CK_FLAGS flags, CK_SLOT_ID_PTR pSlot, CK_VOID_PTR pReserved)
@@ -180,27 +275,53 @@ CK_RV C_SetPIN(CK_SESSION_HANDLE hSession, CK_UTF8CHAR_PTR pOldPin, CK_ULONG ulO
 
 CK_RV C_OpenSession(CK_SLOT_ID slotID, CK_FLAGS flags, CK_VOID_PTR pApplication, CK_NOTIFY Notify, CK_SESSION_HANDLE_PTR phSession)
 {
-    UNUSED(slotID);
-    UNUSED(flags);
     UNUSED(pApplication);
     UNUSED(Notify);
-    UNUSED(phSession);
-    DBG("%s not supported", __func__);
-    return CKR_FUNCTION_NOT_SUPPORTED;
+    json_object *args = NULL, *ret = NULL;
+    CK_RV rv;
+
+    if (phSession == NULL) {
+        return CKR_ARGUMENTS_BAD;
+    }
+
+    args = json_object_new_array();
+    json_object_array_add(args, json_object_new_uint64(slotID));
+    json_object_array_add(args, json_object_new_uint64(flags));
+
+    if ((rv = INVOKE(args, &ret)) != CKR_OK) {
+        goto out;
+    }
+    *phSession = json_object_get_uint64(ret);
+out:
+    json_object_put(args);
+    json_object_put(ret);
+    return rv;
 }
 
 CK_RV C_CloseSession(CK_SESSION_HANDLE hSession)
 {
-    UNUSED(hSession);
-    DBG("%s not supported", __func__);
-    return CKR_FUNCTION_NOT_SUPPORTED;
+    json_object *args = NULL;
+    CK_RV rv;
+
+    args = json_object_new_array();
+    json_object_array_add(args, json_object_new_uint64(hSession));
+
+    rv = INVOKE(args, NULL);
+    json_object_put(args);
+    return rv;
 }
 
 CK_RV C_CloseAllSessions(CK_SLOT_ID slotID)
 {
-    UNUSED(slotID);
-    DBG("%s not supported", __func__);
-    return CKR_FUNCTION_NOT_SUPPORTED;
+    json_object *args = NULL;
+    CK_RV rv;
+
+    args = json_object_new_array();
+    json_object_array_add(args, json_object_new_uint64(slotID));
+
+    rv = INVOKE(args, NULL);
+    json_object_put(args);
+    return rv;
 }
 
 CK_RV C_GetSessionInfo(CK_SESSION_HANDLE hSession, CK_SESSION_INFO_PTR pInfo)
@@ -238,19 +359,30 @@ CK_RV C_SetOperationState(
 
 CK_RV C_Login(CK_SESSION_HANDLE hSession, CK_USER_TYPE userType, CK_UTF8CHAR_PTR pPin, CK_ULONG ulPinLen)
 {
-    UNUSED(hSession);
-    UNUSED(userType);
-    UNUSED(pPin);
-    UNUSED(ulPinLen);
-    DBG("%s not supported", __func__);
-    return CKR_FUNCTION_NOT_SUPPORTED;
+    json_object *args = NULL;
+    CK_RV rv;
+
+    args = json_object_new_array();
+    json_object_array_add(args, json_object_new_uint64(hSession));
+    json_object_array_add(args, json_object_new_uint64(userType));
+    json_object_array_add(args, json_object_new_string_len((char *)pPin, ulPinLen));
+
+    rv = INVOKE(args, NULL);
+    json_object_put(args);
+    return rv;
 }
 
 CK_RV C_Logout(CK_SESSION_HANDLE hSession)
 {
-    UNUSED(hSession);
-    DBG("%s not supported", __func__);
-    return CKR_FUNCTION_NOT_SUPPORTED;
+    json_object *args = NULL;
+    CK_RV rv;
+
+    args = json_object_new_array();
+    json_object_array_add(args, json_object_new_uint64(hSession));
+
+    rv = INVOKE(args, NULL);
+    json_object_put(args);
+    return rv;
 }
 
 CK_RV C_CreateObject(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, CK_ULONG ulCount, CK_OBJECT_HANDLE_PTR phObject)
@@ -293,12 +425,65 @@ CK_RV C_GetObjectSize(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject, CK_U
 
 CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject, CK_ATTRIBUTE_PTR pTemplate, CK_ULONG ulCount)
 {
-    UNUSED(hSession);
-    UNUSED(hObject);
-    UNUSED(pTemplate);
-    UNUSED(ulCount);
-    DBG("%s not supported", __func__);
-    return CKR_FUNCTION_NOT_SUPPORTED;
+    json_object *args = NULL, *ret = NULL;
+    CK_RV rv;
+
+    if (pTemplate == NULL || ulCount == 0) {
+        return CKR_ARGUMENTS_BAD;
+    }
+
+    args = json_object_new_array();
+    json_object_array_add(args, json_object_new_uint64(hSession));
+    json_object_array_add(args, json_object_new_uint64(hObject));
+
+    json_object *objs = json_object_new_array();
+    json_object_array_add(args, objs);
+    for (CK_ULONG i = 0; i < ulCount; i++) {
+        json_object *tmp = json_object_new_object();
+        json_object_object_add(tmp, "type", json_object_new_uint64(pTemplate[i].type));
+        if (pTemplate[i].pValue == NULL) {
+            json_object_object_add(tmp, "valueLen", json_object_new_uint64(0));
+        } else {
+            json_object_object_add(tmp, "valueLen", json_object_new_uint64(pTemplate[i].ulValueLen));
+        }
+        json_object_array_add(objs, tmp);
+    }
+
+    rv = INVOKE(args, &ret);
+
+    if (!json_object_is_type(ret, json_type_array)) {
+        rv = CKR_FUNCTION_FAILED;
+        goto out;
+    }
+
+    size_t len = json_object_array_length(ret);
+    for (size_t i = 0; i < len; i++) {
+        CK_ULONG new_len;
+        json_object *str;
+
+        json_object *tmp = json_object_array_get_idx(ret, i);
+        FILL_INT_BY_JSON(tmp, "type", pTemplate[i].type);
+        FILL_INT_BY_JSON(tmp, "valueLen", new_len);
+
+        // just request length
+        if (!json_object_object_get_ex(tmp, "value", &str)) {
+            pTemplate[i].ulValueLen = new_len;
+            continue;
+        }
+        if (pTemplate[i].ulValueLen != new_len) {
+            continue;
+        }
+        if (mbedtls_base64_decode(pTemplate[i].pValue, pTemplate[i].ulValueLen, &new_len,
+                (unsigned char *)json_object_get_string(str), json_object_get_string_len(str))
+            != 0) {
+            DBG("buffer too small");
+            continue;
+        }
+    }
+out:
+    json_object_put(args);
+    json_object_put(ret);
+    return rv;
 }
 
 CK_RV C_SetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject, CK_ATTRIBUTE_PTR pTemplate, CK_ULONG ulCount)
@@ -313,28 +498,78 @@ CK_RV C_SetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject, 
 
 CK_RV C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, CK_ULONG ulCount)
 {
-    UNUSED(hSession);
-    UNUSED(pTemplate);
-    UNUSED(ulCount);
-    DBG("%s not supported", __func__);
-    return CKR_FUNCTION_NOT_SUPPORTED;
+    json_object *args = NULL;
+    CK_RV rv;
+    char buf[4096];
+    size_t str_len;
+
+    if (ulCount != 0 && pTemplate == NULL) {
+        return CKR_ARGUMENTS_BAD;
+    }
+
+    args = json_object_new_array();
+    json_object_array_add(args, json_object_new_uint64(hSession));
+
+    json_object *objs = json_object_new_array();
+    json_object_array_add(args, objs);
+    for (CK_ULONG i = 0; i < ulCount; i++) {
+        if (mbedtls_base64_encode((unsigned char *)buf, sizeof(buf), &str_len, pTemplate[i].pValue, pTemplate[i].ulValueLen) != 0) {
+            DBG("buffer too small");
+            continue;
+        }
+        json_object *tmp = json_object_new_object();
+        json_object_object_add(tmp, "type", json_object_new_uint64(pTemplate[i].type));
+        json_object_object_add(tmp, "value", json_object_new_string_len(buf, str_len));
+        json_object_object_add(tmp, "valueLen", json_object_new_uint64(pTemplate[i].ulValueLen));
+        json_object_array_add(objs, tmp);
+    }
+
+    rv = INVOKE(args, NULL);
+
+    json_object_put(args);
+    return rv;
 }
 
 CK_RV C_FindObjects(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE_PTR phObject, CK_ULONG ulMaxObjectCount, CK_ULONG_PTR pulObjectCount)
 {
-    UNUSED(hSession);
-    UNUSED(phObject);
-    UNUSED(ulMaxObjectCount);
-    UNUSED(pulObjectCount);
-    DBG("%s not supported", __func__);
-    return CKR_FUNCTION_NOT_SUPPORTED;
+    json_object *args = NULL, *ret = NULL;
+    CK_RV rv;
+
+    if (phObject == NULL || ulMaxObjectCount == 0 || pulObjectCount == NULL) {
+        return CKR_ARGUMENTS_BAD;
+    }
+
+    args = json_object_new_array();
+    json_object_array_add(args, json_object_new_uint64(hSession));
+    json_object_array_add(args, json_object_new_uint64(ulMaxObjectCount));
+
+    if ((rv = INVOKE(args, &ret)) != CKR_OK) {
+        goto out;
+    }
+
+    *pulObjectCount = json_object_array_length(ret);
+    for (CK_ULONG i = 0; i < *pulObjectCount; i++) {
+        json_object *id = json_object_array_get_idx(ret, i);
+        phObject[i] = json_object_get_uint64(id);
+    }
+out:
+    json_object_put(args);
+    json_object_put(ret);
+    return rv;
 }
 
 CK_RV C_FindObjectsFinal(CK_SESSION_HANDLE hSession)
 {
-    UNUSED(hSession);
-    DBG("%s not supported", __func__);
-    return CKR_FUNCTION_NOT_SUPPORTED;
+    json_object *args = NULL;
+    CK_RV rv;
+
+    args = json_object_new_array();
+    json_object_array_add(args, json_object_new_uint64(hSession));
+
+    rv = INVOKE(args, NULL);
+
+    json_object_put(args);
+    return rv;
 }
 
 CK_RV C_EncryptInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJECT_HANDLE hKey)

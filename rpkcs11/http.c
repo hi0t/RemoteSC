@@ -53,23 +53,22 @@ void http_cleanup(struct http *h)
     free(h);
 }
 
-CK_RV http_invoke(struct http *h, const char *method, cJSON *args, cJSON **ret)
+CK_RV http_invoke(struct http *h, const char *method, json_object *args, json_object **ret)
 {
     struct curl_resp raw_resp = { 0 };
     char curl_errbuf[CURL_ERROR_SIZE];
-    cJSON *resp = NULL, *req = NULL;
-    char *raw_req = NULL;
+    json_object *resp = NULL, *req = NULL;
     CK_RV rv;
 
     if (strlen(method) > 2 && method[0] == 'C' && method[1] == '_') {
         method += 2;
     }
 
-    req = cJSON_CreateObject();
-    cJSON_AddStringToObject(req, "method", method);
-    cJSON_AddItemReferenceToObject(req, "args", args);
+    req = json_object_new_object();
+    json_object_object_add(req, "method", json_object_new_string(method));
+    json_object_object_add(req, "args", args);
 
-    raw_req = cJSON_PrintUnformatted(req);
+    const char *raw_req = json_object_to_json_string_ext(req, JSON_C_TO_STRING_PLAIN);
     curl_easy_setopt(h->curl, CURLOPT_POSTFIELDS, raw_req);
     curl_easy_setopt(h->curl, CURLOPT_POSTFIELDSIZE, strlen(raw_req));
     curl_easy_setopt(h->curl, CURLOPT_WRITEDATA, &raw_resp);
@@ -91,31 +90,28 @@ CK_RV http_invoke(struct http *h, const char *method, cJSON *args, cJSON **ret)
         goto out;
     }
 
-    resp = cJSON_Parse(raw_resp.buf);
-
-    cJSON *err = cJSON_GetObjectItem(resp, "err");
-    if (!cJSON_IsNumber(err)) {
-        DBG("invalide reponse: %s", raw_resp.buf);
-        rv = CKR_FUNCTION_FAILED;
-        goto out;
+    rv = CKR_OK;
+    resp = json_tokener_parse(raw_resp.buf);
+    json_object *err;
+    if (json_object_object_get_ex(resp, "err", &err)) {
+        rv = json_object_get_uint64(err);
     }
-    rv = (CK_RV)err->valuedouble;
 
     if (rv != CKR_OK) {
-        cJSON *errDesc = cJSON_GetObjectItem(resp, "errDescription");
-        if (cJSON_IsString(errDesc)) {
-            DBG("error description: %s", errDesc->valuestring);
+        json_object *errDesc;
+        if (json_object_object_get_ex(resp, "errDescription", &errDesc)) {
+            DBG("error description: %s", json_object_get_string(errDesc));
         }
         goto out;
     }
 
-    if (ret != NULL) {
-        *ret = cJSON_DetachItemFromObject(resp, "ret");
+    if (ret != NULL && json_object_object_get_ex(resp, "ret", &*ret)) {
+        json_object_get(*ret);
     }
 out:
-    cJSON_Delete(req);
-    cJSON_Delete(resp);
-    free(raw_req);
+    json_object_get(args);
+    json_object_put(req);
+    json_object_put(resp);
     free(raw_resp.buf);
     return rv;
 }
