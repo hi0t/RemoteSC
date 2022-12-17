@@ -9,17 +9,37 @@ struct rsc_ctx {
     CK_FUNCTION_LIST_PTR f;
 };
 
+static char *errMessage()
+{
+    static char buf[1024];
+    DWORD len = FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+        NULL, GetLastError(), MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US),
+        buf, sizeof(buf), NULL);
+
+    if (len == 0) {
+        return NULL;
+    }
+
+    char *end = buf + len;
+    while (isspace(*--end))
+        ;
+    *(end + 1) = '\0';
+    return buf;
+}
+
 rsc_ctx *rsc_open(const char *module, char **err)
 {
     CK_C_GetFunctionList list;
     struct rsc_ctx *ctx = malloc(sizeof(*ctx));
     ctx->handle = LoadLibrary(module);
     if (ctx->handle == NULL) {
+        *err = errMessage();
         rsc_close(ctx);
         return NULL;
     }
     CK_C_GetFunctionList getfunctionlist = (CK_C_GetFunctionList)GetProcAddress(ctx->handle, "C_GetFunctionList");
     if (getfunctionlist == NULL) {
+        *err = errMessage();
         rsc_close(ctx);
         return NULL;
     }
