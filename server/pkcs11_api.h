@@ -24,7 +24,7 @@ typedef struct rsc_unpacked_mechanism {
     CK_ULONG ulParameterLen;
 } rsc_unpacked_mechanism;
 
-rsc_ctx *rsc_open(const char *module);
+rsc_ctx *rsc_open(const char *module, char **err);
 void rsc_close(rsc_ctx *ctx);
 
 CK_RV rsc_Initialize(rsc_ctx *ctx);

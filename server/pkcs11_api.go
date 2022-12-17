@@ -20,10 +20,11 @@ type pkcs11_ctx struct {
 func OpenPKCS11(module string) (*pkcs11_ctx, error) {
 	mod := C.CString(module)
 	defer C.free(unsafe.Pointer(mod))
+	var cerr *C.char
 
-	c := C.rsc_open(mod)
+	c := C.rsc_open(mod, &cerr)
 	if c == nil {
-		return nil, fmt.Errorf("'%s' module load error", module)
+		return nil, fmt.Errorf("module load error: %s", C.GoString(cerr))
 	}
 	return &pkcs11_ctx{c}, nil
 }

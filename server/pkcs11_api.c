@@ -9,7 +9,7 @@ struct rsc_ctx {
     CK_FUNCTION_LIST_PTR f;
 };
 
-rsc_ctx *rsc_open(const char *module)
+rsc_ctx *rsc_open(const char *module, char **err)
 {
     CK_C_GetFunctionList list;
     struct rsc_ctx *ctx = malloc(sizeof(*ctx));
@@ -24,6 +24,7 @@ rsc_ctx *rsc_open(const char *module)
         return NULL;
     }
     if (getfunctionlist(&ctx->f) != CKR_OK) {
+        *err = "C_GetFunctionList failed";
         rsc_close(ctx);
         return NULL;
     }
@@ -47,21 +48,24 @@ struct rsc_ctx {
     CK_FUNCTION_LIST_PTR f;
 };
 
-rsc_ctx *rsc_open(const char *module)
+rsc_ctx *rsc_open(const char *module, char **err)
 {
     CK_C_GetFunctionList list;
     struct rsc_ctx *ctx = malloc(sizeof(*ctx));
     ctx->handle = dlopen(module, RTLD_LAZY);
     if (ctx->handle == NULL) {
+        *err = dlerror();
         rsc_close(ctx);
         return NULL;
     }
     CK_C_GetFunctionList getfunctionlist = dlsym(ctx->handle, "C_GetFunctionList");
     if (getfunctionlist == NULL) {
+        *err = dlerror();
         rsc_close(ctx);
         return NULL;
     }
     if (getfunctionlist(&ctx->f) != CKR_OK) {
+        *err = "C_GetFunctionList failed";
         rsc_close(ctx);
         return NULL;
     }
