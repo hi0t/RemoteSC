@@ -8,12 +8,10 @@ package server
 */
 import "C"
 import (
-	"errors"
+	"fmt"
 	"strings"
 	"unsafe"
 )
-
-var ErrLoadModule = errors.New("module loading error")
 
 type pkcs11_ctx struct {
 	ctx *C.struct_rsc_ctx
@@ -25,7 +23,7 @@ func OpenPKCS11(module string) (*pkcs11_ctx, error) {
 
 	c := C.rsc_open(mod)
 	if c == nil {
-		return nil, ErrLoadModule
+		return nil, fmt.Errorf("'%s' module load error", module)
 	}
 	return &pkcs11_ctx{c}, nil
 }

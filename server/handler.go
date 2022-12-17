@@ -42,13 +42,9 @@ func NewMessageHandler(provider string) *messageHandler {
 	}
 }
 
-func (h *messageHandler) Start() error {
-	var err error
+func (h *messageHandler) Start() (err error) {
 	h.p11, err = OpenPKCS11(h.provider)
-	if err != nil {
-		return err
-	}
-	return nil
+	return
 }
 
 func (h *messageHandler) Stop() {

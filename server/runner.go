@@ -2,6 +2,9 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -11,31 +14,41 @@ import (
 )
 
 var (
-	listeners []*http.Server
-	handler   *messageHandler
+	listeners    []*http.Server
+	handler      *messageHandler
+	sharedSecret string
 )
 
 type Config struct {
 	Provider string
 	Address  string
+	Secret   string
+	Cert     string
+	Priv     string
 }
 
 func Start(cfg Config) {
 	handler = NewMessageHandler(cfg.Provider)
 	if err := handler.Start(); err != nil {
-		log.Fatalln(err)
+		log.Fatalf("Failed to start message handler: %v", err)
 	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", processReq)
 
 	addrs := extractAddr(cfg.Address)
+	sharedSecret = cfg.Secret
+	cert := extractCertificate(cfg.Cert, cfg.Priv)
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+	}
+
 	for _, a := range addrs {
-		s := &http.Server{Addr: a, Handler: mux}
+		s := &http.Server{Addr: a, Handler: mux, TLSConfig: tlsConfig}
 		listeners = append(listeners, s)
 		go func(addr string) {
-			if err := s.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				log.Fatalln(err)
+			if err := s.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+				log.Fatal(err)
 			}
 		}(a)
 	}
@@ -49,8 +62,16 @@ func Stop() {
 }
 
 func processReq(w http.ResponseWriter, r *http.Request) {
+	authHeader := r.Header.Get("Authorization")
+	reqToken := strings.TrimPrefix(authHeader, "Bearer")
+	reqToken = strings.TrimSpace(reqToken)
+	if reqToken != sharedSecret {
+		http.Error(w, "access denited", http.StatusForbidden)
+		return
+	}
+
 	if r.Method != "POST" {
-		w.WriteHeader(http.StatusMethodNotAllowed)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -61,8 +82,7 @@ func processReq(w http.ResponseWriter, r *http.Request) {
 
 	var req *Req
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(err.Error()))
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -70,12 +90,11 @@ func processReq(w http.ResponseWriter, r *http.Request) {
 
 	json, err := json.Marshal(resp)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(err.Error()))
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	w.Write(json)
 }
@@ -83,7 +102,7 @@ func processReq(w http.ResponseWriter, r *http.Request) {
 func extractAddr(listen string) []string {
 	host, port, err := net.SplitHostPort(listen)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Failed to parse listen address: %v", err)
 	}
 	if !strings.HasPrefix(host, "<") {
 		return []string{fmt.Sprintf("%s:%s", host, port)}
@@ -94,7 +113,7 @@ func extractAddr(listen string) []string {
 
 	ief, err := net.InterfaceByName(host)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Failed to find interface: %v", err)
 	}
 	addrs, err := ief.Addrs()
 	if err != nil {
@@ -113,4 +132,24 @@ func extractAddr(listen string) []string {
 		}
 	}
 	return res
+}
+
+func extractCertificate(encCert, encPriv string) tls.Certificate {
+	rawCert, err := base64.StdEncoding.DecodeString(encCert)
+	if err != nil {
+		log.Fatalf("Unable to decode certificate: %v", err)
+	}
+	rawPriv, err := base64.StdEncoding.DecodeString(encPriv)
+	if err != nil {
+		log.Fatalf("Unable to decode private key: %v", err)
+	}
+	priv, err := x509.ParsePKCS8PrivateKey(rawPriv)
+	if err != nil {
+		log.Fatalf("Failed to parse private key: %v", err)
+	}
+
+	return tls.Certificate{
+		Certificate: [][]byte{rawCert},
+		PrivateKey:  priv,
+	}
 }

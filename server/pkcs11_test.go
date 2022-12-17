@@ -1,9 +1,11 @@
 package server
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"remotesc/cmd"
 	"strings"
 	"testing"
 
@@ -36,10 +38,8 @@ func (s *pkcs11TestSuite) SetupSuite() {
 	s.tmp, err = prepareSoftHSMCfg()
 	require.NoError(s.T(), err)
 
-	Start(Config{
-		Provider: testLib,
-		Address:  testAddress,
-	})
+	cfg := prepareServerCfg()
+	Start(cfg)
 
 	s.ctx, err = OpenPKCS11(libPath)
 	require.NoError(s.T(), err)
@@ -104,4 +104,23 @@ func prepareSoftHSMCfg() (string, error) {
 
 	os.Setenv("SOFTHSM2_CONF", cfgPaht)
 	return tmp, nil
+}
+
+func prepareServerCfg() Config {
+	vars := make(map[string]string)
+	clientStr := cmd.Configure(vars)
+
+	var clinetCfg map[string]string
+	json.Unmarshal([]byte(clientStr), &clinetCfg)
+
+	os.Setenv("REMOTESC_FINGERPRINT", clinetCfg["fingerprint"])
+	os.Setenv("REMOTESC_SECRET", clinetCfg["secret"])
+
+	return Config{
+		Provider: testLib,
+		Address:  testAddress,
+		Secret:   vars["REMOTESC_SECRET"],
+		Cert:     vars["REMOTESC_CERT"],
+		Priv:     vars["REMOTESC_PRIV"],
+	}
 }

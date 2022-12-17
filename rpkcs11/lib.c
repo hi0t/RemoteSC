@@ -5,7 +5,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define DEFAULT_ADDR "127.0.0.1:44555"
 #define MAX_CRYPTO_OBJ_SIZE 4096
 
 #define INVOKE(args, ret) http_invoke(client, __func__, args, ret, false)
@@ -50,17 +49,23 @@ CK_RV C_Initialize(CK_VOID_PTR pInitArgs)
     __rsc_dbg = true;
 #endif
     UNUSED(pInitArgs);
+    CK_RV rv;
 
-    const char *addr = getenv("REMOTESC_ADDR");
-    if (addr == NULL) {
-        addr = DEFAULT_ADDR;
+    struct rsc_config *cfg = parse_config();
+    if (cfg == NULL) {
+        rv = CKR_FUNCTION_FAILED;
+        goto out;
     }
 
-    client = http_init(addr);
+    client = http_init(cfg->addr, cfg->fingerprint, cfg->secret);
     if (client == NULL) {
-        return CKR_FUNCTION_FAILED;
+        rv = CKR_FUNCTION_FAILED;
+        goto out;
     }
-    return INVOKE(NULL, NULL);
+    rv = INVOKE(NULL, NULL);
+out:
+    free_config(cfg);
+    return rv;
 }
 
 CK_RV C_Finalize(CK_VOID_PTR pReserved)

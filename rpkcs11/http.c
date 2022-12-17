@@ -2,7 +2,6 @@
 #include "utils.h"
 
 #include <curl/curl.h>
-#include <curl/mprintf.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -18,8 +17,9 @@ struct curl_resp {
 
 static size_t curl_write_cb(void *contents, size_t size, size_t nmemb, void *userp);
 
-struct http *http_init(const char *addr)
+struct http *http_init(const char *addr, const char *fingerprint, const char *shared_secret)
 {
+    char str[1024];
     CURL *curl = curl_easy_init();
     if (curl == NULL) {
         return NULL;
@@ -28,13 +28,17 @@ struct http *http_init(const char *addr)
     struct http *h = malloc(sizeof(*h));
     h->curl = curl;
 
-    char *url = curl_maprintf("http://%s", addr);
-    curl_easy_setopt(h->curl, CURLOPT_URL, url);
-    curl_free(url);
+    snprintf(str, sizeof(str), "https://%s", addr);
+    curl_easy_setopt(h->curl, CURLOPT_URL, str);
 
-    h->headers = curl_slist_append(NULL, "Content-Type: application/json");
+    snprintf(str, sizeof(str), "sha256//%s", fingerprint);
+    curl_easy_setopt(curl, CURLOPT_PINNEDPUBLICKEY, str);
+
+    h->headers = curl_slist_append(NULL, "Content-Type: application/json; charset=utf-8");
+    snprintf(str, sizeof(str), "Authorization: Bearer %s", shared_secret);
+    h->headers = curl_slist_append(h->headers, str);
+
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, h->headers);
-
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_cb);
     curl_easy_setopt(curl, CURLOPT_COOKIEJAR, NULL);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
@@ -83,7 +87,12 @@ CK_RV http_invoke(struct http *h, const char *method, json_object *args, json_ob
     }
 
     if (cerr != CURLE_OK) {
-        DBG("http err: (%d) %s", cerr, curl_errbuf);
+        size_t len = strlen(curl_errbuf);
+        if (len == 0) {
+            DBG("http err: (%d) %s", cerr, curl_easy_strerror(cerr));
+        } else {
+            DBG("http err: (%d) %s", cerr, curl_errbuf);
+        }
         rv = CKR_FUNCTION_FAILED;
         goto out;
     }
