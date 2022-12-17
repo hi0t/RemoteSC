@@ -96,6 +96,12 @@ func main() {
 		os.Exit(0)
 	}
 
+	logs, err := s.Logger(nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.SetOutput(&serviceLogger{logs: logs})
+
 	if err = s.Run(); err != nil {
 		log.Fatal(err)
 	}
@@ -113,4 +119,13 @@ func testProvider(module string) {
 		log.Fatal(err)
 	}
 	ctx.Close()
+}
+
+type serviceLogger struct {
+	logs service.Logger
+}
+
+func (s *serviceLogger) Write(p []byte) (n int, err error) {
+	s.logs.Error(string(p))
+	return len(p), nil
 }
