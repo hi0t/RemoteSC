@@ -1,7 +1,7 @@
 package server
 
 /*
-#cgo CFLAGS: -I../rpkcs11
+#cgo CFLAGS: -I${SRCDIR}/../rpkcs11
 
 #include "pkcs11_api.h"
 #include <stdlib.h>
@@ -14,7 +14,7 @@ import (
 )
 
 type pkcs11_ctx struct {
-	ctx *C.struct_rsc_ctx
+	ctx *C.rsc_ctx
 }
 
 func OpenPKCS11(module string) (*pkcs11_ctx, error) {
@@ -41,7 +41,7 @@ func (c *pkcs11_ctx) Finalize() error {
 }
 
 func (c *pkcs11_ctx) GetInfo() (ckInfo, error) {
-	var info C.struct_rsc_unpacked_info
+	var info C.rsc_unpacked_info
 	rv := C.rsc_GetInfo(c.ctx, &info)
 	return ckInfo{
 		CryptokiVersion:    wrapVersion(info.cryptokiVersion),
@@ -57,7 +57,7 @@ func (c *pkcs11_ctx) GetSlotList(tokenPresent bool, cnt uint) (ckSlotList, error
 	ccnt := C.CK_ULONG(cnt)
 
 	if cnt > 0 {
-		pSlotList = C.CK_SLOT_ID_PTR(C.calloc(C.CK_ULONG(cnt), C.sizeof_CK_SLOT_ID))
+		pSlotList = C.CK_SLOT_ID_PTR(C.malloc(C.size_t(cnt) * C.sizeof_CK_SLOT_ID))
 	}
 
 	rv := C.rsc_GetSlotList(c.ctx, wrapBool(tokenPresent), pSlotList, &ccnt)
@@ -136,12 +136,12 @@ func (c *pkcs11_ctx) Logout(sess ckSessionHandle) error {
 }
 
 func (c *pkcs11_ctx) GetAttributeValue(sess ckSessionHandle, obj ckObjectHandle, attr []ckAttribute) ([]ckAttribute, error) {
-	cattr := make([]C.CK_ATTRIBUTE, len(attr))
+	cattr := make([]C.rsc_unpacked_attribute, len(attr))
 	for i, a := range attr {
 		cattr[i]._type = C.CK_ATTRIBUTE_TYPE(a.Type)
 		cattr[i].ulValueLen = C.CK_ULONG(a.ValueLen)
 		if a.ValueLen > 0 {
-			cattr[i].pValue = C.calloc(C.CK_ULONG(a.ValueLen), C.sizeof_CK_BYTE)
+			cattr[i].pValue = C.CK_VOID_PTR(C.malloc(C.size_t(a.ValueLen) * C.sizeof_CK_BYTE))
 		}
 	}
 
@@ -152,8 +152,8 @@ func (c *pkcs11_ctx) GetAttributeValue(sess ckSessionHandle, obj ckObjectHandle,
 		res[i].Type = uint(a._type)
 		res[i].ValueLen = uint(a.ulValueLen)
 		if a.pValue != nil {
-			res[i].Value = C.GoBytes(a.pValue, C.int(a.ulValueLen))
-			C.free(a.pValue)
+			res[i].Value = C.GoBytes(unsafe.Pointer(a.pValue), C.int(a.ulValueLen))
+			C.free(unsafe.Pointer(a.pValue))
 		}
 	}
 	return res, wrapError(rv)
@@ -167,7 +167,7 @@ func (c *pkcs11_ctx) FindObjectsInit(sess ckSessionHandle, pTemplate []ckAttribu
 
 func (c *pkcs11_ctx) FindObjects(sess ckSessionHandle, maxObjs uint) ([]ckObjectHandle, error) {
 	var count C.CK_ULONG
-	obj := C.CK_OBJECT_HANDLE_PTR(C.calloc(C.CK_ULONG(maxObjs), C.sizeof_CK_OBJECT_HANDLE))
+	obj := C.CK_OBJECT_HANDLE_PTR(C.malloc(C.size_t(maxObjs) * C.sizeof_CK_OBJECT_HANDLE))
 
 	rv := C.rsc_FindObjects(c.ctx, C.CK_SESSION_HANDLE(sess), obj, C.CK_ULONG(maxObjs), &count)
 	if rv != C.CKR_OK {
@@ -189,12 +189,12 @@ func (c *pkcs11_ctx) FindObjectsFinal(sess ckSessionHandle) error {
 }
 
 func (c *pkcs11_ctx) SignInit(sess ckSessionHandle, mech ckMechanism, key ckObjectHandle) error {
-	cmech := &C.CK_MECHANISM{
+	cmech := &C.rsc_unpacked_mechanism{
 		mechanism:      C.CK_MECHANISM_TYPE(mech.Mechanism),
-		pParameter:     C.CBytes(mech.Parameter),
+		pParameter:     C.CK_VOID_PTR(C.CBytes(mech.Parameter)),
 		ulParameterLen: C.CK_ULONG(len(mech.Parameter)),
 	}
-	defer C.free(cmech.pParameter)
+	defer C.free(unsafe.Pointer(cmech.pParameter))
 	return wrapError(C.rsc_SignInit(c.ctx, C.CK_SESSION_HANDLE(sess), cmech, C.CK_OBJECT_HANDLE(key)))
 }
 
@@ -206,7 +206,7 @@ func (c *pkcs11_ctx) Sign(sess ckSessionHandle, msg []byte, signLen uint) (ckSig
 	defer C.free(cmsg)
 
 	if signLen > 0 {
-		sign = C.malloc(C.CK_ULONG(signLen))
+		sign = C.malloc(C.size_t(signLen))
 		defer C.free(sign)
 	}
 	rv := C.rsc_Sign(c.ctx, C.CK_SESSION_HANDLE(sess), C.CK_BYTE_PTR(cmsg), C.CK_ULONG(len(msg)), C.CK_BYTE_PTR(sign), &cSignLen)
@@ -225,7 +225,7 @@ func (c *pkcs11_ctx) SignFinal(sess ckSessionHandle, signLen uint) (ckSignData, 
 	cSignLen := C.CK_ULONG(signLen)
 
 	if signLen > 0 {
-		sign = C.malloc(C.CK_ULONG(signLen))
+		sign = C.malloc(C.size_t(signLen))
 		defer C.free(sign)
 	}
 	rv := C.rsc_SignFinal(c.ctx, C.CK_SESSION_HANDLE(sess), C.CK_BYTE_PTR(sign), &cSignLen)

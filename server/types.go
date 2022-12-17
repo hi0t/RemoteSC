@@ -107,14 +107,14 @@ func wrapBool(x bool) C.CK_BBOOL {
 	return C.CK_FALSE
 }
 
-func wrapAttributeArr(arr []ckAttribute) (func(), C.CK_ATTRIBUTE_PTR, C.CK_ULONG) {
-	pArr := make([]C.CK_ATTRIBUTE, len(arr))
+func wrapAttributeArr(arr []ckAttribute) (func(), *C.rsc_unpacked_attribute, C.CK_ULONG) {
+	pArr := make([]C.rsc_unpacked_attribute, len(arr))
 	ptrs := make([]unsafe.Pointer, len(arr))
 	for i, a := range arr {
 		pArr[i]._type = C.CK_ATTRIBUTE_TYPE(a.Type)
 		if len(a.Value) > 0 {
 			ptrs[i] = C.CBytes(a.Value)
-			pArr[i].pValue = ptrs[i]
+			pArr[i].pValue = C.CK_VOID_PTR(ptrs[i])
 			pArr[i].ulValueLen = C.CK_ULONG(len(a.Value))
 		}
 	}

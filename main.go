@@ -56,8 +56,8 @@ func main() {
 
 	log.SetFlags(0)
 	svcConfig := &service.Config{
-		Name:        "RmoteSC",
-		DisplayName: "RmoteSC",
+		Name:        "RemoteSC",
+		DisplayName: "RemoteSC",
 		Description: "PKCS#11 remote access",
 	}
 
@@ -74,13 +74,19 @@ func main() {
 			if *provider == "" {
 				usage()
 			}
+			testProvider(*provider)
 
 			svcConfig.EnvVars = make(map[string]string)
 			svcConfig.EnvVars["REMOTESC_PROVIDER"] = *provider
 			svcConfig.EnvVars["REMOTESC_LISTEN"] = *listen
-			cmd.Configure(svcConfig.EnvVars)
+			clientCfg := cmd.Configure(svcConfig.EnvVars)
 
 			if err = s.Install(); err != nil {
+				log.Fatal(err)
+			}
+			fmt.Println(clientCfg)
+		case "uninstall":
+			if err = s.Uninstall(); err != nil {
 				log.Fatal(err)
 			}
 		default:
@@ -97,5 +103,14 @@ func main() {
 
 func usage() {
 	fmt.Fprintf(os.Stderr, "usage: %s install --provider <module> [--listen <address>] \n", os.Args[0])
+	fmt.Fprint(os.Stderr, "   or: uninstall\n")
 	os.Exit(1)
+}
+
+func testProvider(module string) {
+	ctx, err := server.OpenPKCS11(module)
+	if err != nil {
+		log.Fatal(err)
+	}
+	ctx.Close()
 }

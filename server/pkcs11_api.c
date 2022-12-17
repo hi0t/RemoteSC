@@ -9,7 +9,7 @@ struct rsc_ctx {
     CK_FUNCTION_LIST_PTR f;
 };
 
-struct rsc_ctx *rsc_open(const char *module)
+rsc_ctx *rsc_open(const char *module)
 {
     CK_C_GetFunctionList list;
     struct rsc_ctx *ctx = malloc(sizeof(*ctx));
@@ -30,7 +30,7 @@ struct rsc_ctx *rsc_open(const char *module)
     return ctx;
 }
 
-void rsc_close(struct rsc_ctx *ctx)
+void rsc_close(rsc_ctx *ctx)
 {
     if (ctx == NULL) {
         return;
@@ -47,7 +47,7 @@ struct rsc_ctx {
     CK_FUNCTION_LIST_PTR f;
 };
 
-struct rsc_ctx *rsc_open(const char *module)
+rsc_ctx *rsc_open(const char *module)
 {
     CK_C_GetFunctionList list;
     struct rsc_ctx *ctx = malloc(sizeof(*ctx));
@@ -68,7 +68,7 @@ struct rsc_ctx *rsc_open(const char *module)
     return ctx;
 }
 
-void rsc_close(struct rsc_ctx *ctx)
+void rsc_close(rsc_ctx *ctx)
 {
     if (ctx == NULL) {
         return;
@@ -80,17 +80,17 @@ void rsc_close(struct rsc_ctx *ctx)
 }
 #endif
 
-CK_RV rsc_Initialize(struct rsc_ctx *ctx)
+CK_RV rsc_Initialize(rsc_ctx *ctx)
 {
     return ctx->f->C_Initialize(NULL);
 }
 
-CK_RV rsc_Finalize(struct rsc_ctx *ctx)
+CK_RV rsc_Finalize(rsc_ctx *ctx)
 {
     return ctx->f->C_Finalize(NULL);
 }
 
-CK_RV rsc_GetInfo(struct rsc_ctx *ctx, struct rsc_unpacked_info *uInfo)
+CK_RV rsc_GetInfo(rsc_ctx *ctx, rsc_unpacked_info *uInfo)
 {
     CK_INFO pInfo;
     CK_RV rv = ctx->f->C_GetInfo(&pInfo);
@@ -105,89 +105,125 @@ CK_RV rsc_GetInfo(struct rsc_ctx *ctx, struct rsc_unpacked_info *uInfo)
     return rv;
 }
 
-CK_RV rsc_GetSlotList(struct rsc_ctx *ctx, CK_BBOOL tokenPresent, CK_SLOT_ID_PTR pSlotList, CK_ULONG_PTR pulCount)
+CK_RV rsc_GetSlotList(rsc_ctx *ctx, CK_BBOOL tokenPresent, CK_SLOT_ID_PTR pSlotList, CK_ULONG_PTR pulCount)
 {
     return ctx->f->C_GetSlotList(tokenPresent, pSlotList, pulCount);
 }
 
-CK_RV rsc_GetSlotInfo(struct rsc_ctx *ctx, CK_SLOT_ID slotID, CK_SLOT_INFO_PTR pInfo)
+CK_RV rsc_GetSlotInfo(rsc_ctx *ctx, CK_SLOT_ID slotID, CK_SLOT_INFO_PTR pInfo)
 {
     return ctx->f->C_GetSlotInfo(slotID, pInfo);
 }
 
-CK_RV rsc_GetTokenInfo(struct rsc_ctx *ctx, CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo)
+CK_RV rsc_GetTokenInfo(rsc_ctx *ctx, CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo)
 {
     return ctx->f->C_GetTokenInfo(slotID, pInfo);
 }
 
-CK_RV rsc_OpenSession(struct rsc_ctx *ctx, CK_SLOT_ID slotID, CK_FLAGS flags, CK_SESSION_HANDLE_PTR phSession)
+CK_RV rsc_OpenSession(rsc_ctx *ctx, CK_SLOT_ID slotID, CK_FLAGS flags, CK_SESSION_HANDLE_PTR phSession)
 {
     return ctx->f->C_OpenSession(slotID, flags, NULL, NULL, phSession);
 }
 
-CK_RV rsc_CloseSession(struct rsc_ctx *ctx, CK_SESSION_HANDLE hSession)
+CK_RV rsc_CloseSession(rsc_ctx *ctx, CK_SESSION_HANDLE hSession)
 {
     return ctx->f->C_CloseSession(hSession);
 }
 
-CK_RV rsc_CloseAllSessions(struct rsc_ctx *ctx, CK_SLOT_ID slotID)
+CK_RV rsc_CloseAllSessions(rsc_ctx *ctx, CK_SLOT_ID slotID)
 {
     return ctx->f->C_CloseAllSessions(slotID);
 }
 
-CK_RV rsc_Login(struct rsc_ctx *ctx, CK_SESSION_HANDLE hSession, CK_USER_TYPE userType, char *pPin, CK_ULONG ulPinLen)
+CK_RV rsc_Login(rsc_ctx *ctx, CK_SESSION_HANDLE hSession, CK_USER_TYPE userType, char *pPin, CK_ULONG ulPinLen)
 {
     CK_RV rv = ctx->f->C_Login(hSession, userType, (CK_UTF8CHAR_PTR)pPin, ulPinLen);
     memset(pPin, '*', ulPinLen);
     return rv;
 }
 
-CK_RV rsc_Logout(struct rsc_ctx *ctx, CK_SESSION_HANDLE hSession)
+CK_RV rsc_Logout(rsc_ctx *ctx, CK_SESSION_HANDLE hSession)
 {
     return ctx->f->C_Logout(hSession);
 }
 
-CK_RV rsc_GetAttributeValue(struct rsc_ctx *ctx, CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject, CK_ATTRIBUTE_PTR pTemplate, CK_ULONG ulCount)
+CK_RV rsc_GetAttributeValue(rsc_ctx *ctx, CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject, rsc_unpacked_attribute *uTemplate, CK_ULONG ulCount)
 {
+    CK_ATTRIBUTE_PTR pTemplate = malloc(ulCount * sizeof(CK_ATTRIBUTE));
     for (CK_ULONG i = 0; i < ulCount; i++) {
-        if (pTemplate[i].ulValueLen > 0) {
-            pTemplate[i].pValue = malloc(pTemplate[i].ulValueLen);
-        }
+        pTemplate[i].type = uTemplate[i].type;
+        pTemplate[i].pValue = uTemplate[i].pValue;
+        pTemplate[i].ulValueLen = uTemplate[i].ulValueLen;
     }
-    return ctx->f->C_GetAttributeValue(hSession, hObject, pTemplate, ulCount);
+
+    CK_RV rv = ctx->f->C_GetAttributeValue(hSession, hObject, pTemplate, ulCount);
+
+    for (CK_ULONG i = 0; i < ulCount; i++) {
+        uTemplate[i].type = pTemplate[i].type;
+        uTemplate[i].pValue = pTemplate[i].pValue;
+        uTemplate[i].ulValueLen = pTemplate[i].ulValueLen;
+    }
+    free(pTemplate);
+    return rv;
 }
 
-CK_RV rsc_FindObjectsInit(struct rsc_ctx *ctx, CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, CK_ULONG ulCount)
+CK_RV rsc_FindObjectsInit(rsc_ctx *ctx, CK_SESSION_HANDLE hSession, rsc_unpacked_attribute *uTemplate, CK_ULONG ulCount)
 {
-    return ctx->f->C_FindObjectsInit(hSession, pTemplate, ulCount);
+    CK_ATTRIBUTE_PTR pTemplate = malloc(ulCount * sizeof(CK_ATTRIBUTE));
+    for (CK_ULONG i = 0; i < ulCount; i++) {
+        pTemplate[i].type = uTemplate[i].type;
+        pTemplate[i].pValue = uTemplate[i].pValue;
+        pTemplate[i].ulValueLen = uTemplate[i].ulValueLen;
+    }
+
+    CK_RV rv = ctx->f->C_FindObjectsInit(hSession, pTemplate, ulCount);
+
+    for (CK_ULONG i = 0; i < ulCount; i++) {
+        uTemplate[i].type = pTemplate[i].type;
+        uTemplate[i].pValue = pTemplate[i].pValue;
+        uTemplate[i].ulValueLen = pTemplate[i].ulValueLen;
+    }
+    free(pTemplate);
+    return rv;
 }
 
-CK_RV rsc_FindObjects(struct rsc_ctx *ctx, CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE_PTR phObject, CK_ULONG ulMaxObjectCount, CK_ULONG_PTR pulObjectCount)
+CK_RV rsc_FindObjects(rsc_ctx *ctx, CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE_PTR phObject, CK_ULONG ulMaxObjectCount, CK_ULONG_PTR pulObjectCount)
 {
     return ctx->f->C_FindObjects(hSession, phObject, ulMaxObjectCount, pulObjectCount);
 }
 
-CK_RV rsc_FindObjectsFinal(struct rsc_ctx *ctx, CK_SESSION_HANDLE hSession)
+CK_RV rsc_FindObjectsFinal(rsc_ctx *ctx, CK_SESSION_HANDLE hSession)
 {
     return ctx->f->C_FindObjectsFinal(hSession);
 }
 
-CK_RV rsc_SignInit(struct rsc_ctx *ctx, CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJECT_HANDLE hKey)
+CK_RV rsc_SignInit(rsc_ctx *ctx, CK_SESSION_HANDLE hSession, rsc_unpacked_mechanism *uMechanism, CK_OBJECT_HANDLE hKey)
 {
-    return ctx->f->C_SignInit(hSession, pMechanism, hKey);
+    CK_MECHANISM pMechanism = {
+        .mechanism = uMechanism->mechanism,
+        .pParameter = uMechanism->pParameter,
+        .ulParameterLen = uMechanism->ulParameterLen
+    };
+
+    CK_RV rv = ctx->f->C_SignInit(hSession, &pMechanism, hKey);
+
+    uMechanism->mechanism = pMechanism.mechanism;
+    uMechanism->pParameter = pMechanism.pParameter;
+    uMechanism->ulParameterLen = pMechanism.ulParameterLen;
+    return rv;
 }
 
-CK_RV rsc_Sign(struct rsc_ctx *ctx, CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG ulDataLen, CK_BYTE_PTR pSignature, CK_ULONG_PTR pulSignatureLen)
+CK_RV rsc_Sign(rsc_ctx *ctx, CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG ulDataLen, CK_BYTE_PTR pSignature, CK_ULONG_PTR pulSignatureLen)
 {
     return ctx->f->C_Sign(hSession, pData, ulDataLen, pSignature, pulSignatureLen);
 }
 
-CK_RV rsc_SignUpdate(struct rsc_ctx *ctx, CK_SESSION_HANDLE hSession, CK_BYTE_PTR pPart, CK_ULONG ulPartLen)
+CK_RV rsc_SignUpdate(rsc_ctx *ctx, CK_SESSION_HANDLE hSession, CK_BYTE_PTR pPart, CK_ULONG ulPartLen)
 {
     return ctx->f->C_SignUpdate(hSession, pPart, ulPartLen);
 }
 
-CK_RV rsc_SignFinal(struct rsc_ctx *ctx, CK_SESSION_HANDLE hSession, CK_BYTE_PTR pSignature, CK_ULONG_PTR pulSignatureLen)
+CK_RV rsc_SignFinal(rsc_ctx *ctx, CK_SESSION_HANDLE hSession, CK_BYTE_PTR pSignature, CK_ULONG_PTR pulSignatureLen)
 {
     return ctx->f->C_SignFinal(hSession, pSignature, pulSignatureLen);
 }
