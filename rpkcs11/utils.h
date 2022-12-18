@@ -1,10 +1,35 @@
 #pragma once
 
+#include <cjson/cJSON.h>
 #include <stdbool.h>
 #include <stddef.h>
 
 #define UNUSED(x) (void)(x)
 #define DBG(fmt, ...) debug(__func__, __LINE__, fmt, ##__VA_ARGS__)
+
+#define FILL_STRING_BY_JSON(json, key, str)                  \
+    do {                                                     \
+        cJSON *obj = cJSON_GetObjectItem(json, key);         \
+        if (cJSON_IsString(obj))                             \
+            padded_copy(str, obj->valuestring, sizeof(str)); \
+        else                                                 \
+            memset(str, ' ', sizeof(str));                   \
+    } while (0)
+#define FILL_INT_BY_JSON(json, key, val)                               \
+    do {                                                               \
+        cJSON *obj = cJSON_GetObjectItem(json, key);                   \
+        val = cJSON_IsNumber(obj) ? (typeof(val))obj->valuedouble : 0; \
+    } while (0)
+#define FILL_VERSION_BY_JSON(json, key, ver)              \
+    do {                                                  \
+        cJSON *verObj = cJSON_GetObjectItem(json, key);   \
+        ver.major = 0;                                    \
+        ver.minor = 0;                                    \
+        if (cJSON_IsObject(verObj)) {                     \
+            FILL_INT_BY_JSON(verObj, "major", ver.major); \
+            FILL_INT_BY_JSON(verObj, "minor", ver.minor); \
+        }                                                 \
+    } while (0)
 
 struct rsc_config {
     char *addr;

@@ -1,6 +1,5 @@
 #include "utils.h"
 
-#include <json-c/json.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,6 +9,8 @@
 #define DEFAULT_ADDR "127.0.0.1:44555"
 
 bool __rsc_dbg = false;
+
+static cJSON *read_file(const char *fname);
 
 void debug(const char *func, int line, const char *fmt, ...)
 {
@@ -37,6 +38,7 @@ void padded_copy(unsigned char *dst, const char *src, size_t dst_size)
 
 struct rsc_config *parse_config()
 {
+    struct rsc_config *cfg = NULL;
     const char *cfg_path = getenv("REMOTESC_CONFIG");
     if (cfg_path == NULL) {
         cfg_path = DEFAULT_CFG_PATH;
@@ -46,17 +48,20 @@ struct rsc_config *parse_config()
     const char *fingerprint = getenv("REMOTESC_FINGERPRINT");
     const char *secret = getenv("REMOTESC_SECRET");
 
-    json_object *root = json_object_from_file(cfg_path);
-    if (root != NULL) {
-        json_object *obj;
-        if (addr == NULL && json_object_object_get_ex(root, "addr", &obj)) {
-            addr = json_object_get_string(obj);
+    cJSON *root = read_file(cfg_path);
+    if (cJSON_IsObject(root)) {
+        cJSON *obj;
+        obj = cJSON_GetObjectItem(root, "addr");
+        if (addr == NULL && cJSON_IsString(obj)) {
+            addr = obj->string;
         }
-        if (fingerprint == NULL && json_object_object_get_ex(root, "fingerprint", &obj)) {
-            fingerprint = json_object_get_string(obj);
+        obj = cJSON_GetObjectItem(root, "fingerprint");
+        if (fingerprint == NULL && cJSON_IsString(obj)) {
+            fingerprint = obj->string;
         }
-        if (secret == NULL && json_object_object_get_ex(root, "secret", &obj)) {
-            secret = json_object_get_string(obj);
+        obj = cJSON_GetObjectItem(root, "secret");
+        if (secret == NULL && cJSON_IsString(obj)) {
+            secret = obj->string;
         }
     }
 
@@ -65,17 +70,19 @@ struct rsc_config *parse_config()
     }
     if (fingerprint == NULL) {
         DBG("fingerprint not configured");
-        return NULL;
+        goto out;
     }
     if (secret == NULL) {
         DBG("shared secret not configured");
-        return NULL;
+        goto out;
     }
 
-    struct rsc_config *cfg = malloc(sizeof(*cfg));
+    cfg = malloc(sizeof(*cfg));
     cfg->addr = strdup(addr);
     cfg->fingerprint = strdup(fingerprint);
     cfg->secret = strdup(secret);
+out:
+    cJSON_Delete(root);
     return cfg;
 }
 
@@ -88,4 +95,24 @@ void free_config(struct rsc_config *cfg)
     free(cfg->fingerprint);
     free(cfg->secret);
     free(cfg);
+}
+
+static cJSON *read_file(const char *fname)
+{
+    FILE *file = fopen(fname, "rb");
+    if (file == NULL) {
+        return NULL;
+    }
+
+    fseek(file, 0, SEEK_END);
+    size_t length = ftell(file);
+    fseek(file, 0, SEEK_SET);
+
+    char *content = malloc(length);
+    size_t n = fread(content, sizeof(char), length, file);
+    fclose(file);
+
+    cJSON *json = cJSON_ParseWithLength(content, n);
+    free(content);
+    return json;
 }

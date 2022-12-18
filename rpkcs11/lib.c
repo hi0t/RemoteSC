@@ -9,34 +9,6 @@
 
 #define INVOKE(args, ret) http_invoke(client, __func__, args, ret, false)
 #define INVOKE_SAFE(args, ret) http_invoke(client, __func__, args, ret, true)
-#define FILL_STRING_BY_JSON(json, key, str)                             \
-    do {                                                                \
-        json_object *j = json;                                          \
-        json_object *obj;                                               \
-        if (json_object_object_get_ex(j, key, &obj))                    \
-            padded_copy(str, json_object_get_string(obj), sizeof(str)); \
-        else                                                            \
-            memset(str, ' ', sizeof(str));                              \
-    } while (0)
-#define FILL_INT_BY_JSON(json, key, val)                    \
-    do {                                                    \
-        json_object *j = json;                              \
-        json_object *obj;                                   \
-        val = 0;                                            \
-        if (json_object_object_get_ex(j, key, &obj))        \
-            val = (typeof(val))json_object_get_uint64(obj); \
-    } while (0)
-#define FILL_VERSION_BY_JSON(json, key, ver)           \
-    do {                                               \
-        json_object *j = json;                         \
-        json_object *obj;                              \
-        ver.major = 0;                                 \
-        ver.minor = 0;                                 \
-        if (json_object_object_get_ex(j, key, &obj)) { \
-            FILL_INT_BY_JSON(obj, "major", ver.major); \
-            FILL_INT_BY_JSON(obj, "minor", ver.minor); \
-        }                                              \
-    } while (0)
 
 static CK_FUNCTION_LIST function_list;
 static struct http *client;
@@ -79,7 +51,7 @@ CK_RV C_Finalize(CK_VOID_PTR pReserved)
 
 CK_RV C_GetInfo(CK_INFO_PTR pInfo)
 {
-    json_object *ret = NULL;
+    cJSON *ret = NULL;
     CK_RV rv;
 
     if (pInfo == NULL) {
@@ -95,7 +67,7 @@ CK_RV C_GetInfo(CK_INFO_PTR pInfo)
     FILL_INT_BY_JSON(ret, "flags", pInfo->flags);
     FILL_STRING_BY_JSON(ret, "libraryDescription", pInfo->libraryDescription);
     FILL_VERSION_BY_JSON(ret, "libraryVersion", pInfo->libraryVersion);
-    json_object_put(ret);
+    cJSON_Delete(ret);
 
     return rv;
 }
@@ -111,62 +83,63 @@ CK_RV C_GetFunctionList(CK_FUNCTION_LIST_PTR_PTR ppFunctionList)
 
 CK_RV C_GetSlotList(CK_BBOOL tokenPresent, CK_SLOT_ID_PTR pSlotList, CK_ULONG_PTR pulCount)
 {
-    json_object *args = NULL, *ret = NULL;
+    cJSON *args = NULL, *ret = NULL;
     CK_RV rv;
 
     if (pulCount == NULL) {
         return CKR_ARGUMENTS_BAD;
     }
 
-    args = json_object_new_array();
-    json_object_array_add(args, json_object_new_boolean(tokenPresent));
+    args = cJSON_CreateArray();
+    cJSON_AddItemToArray(args, cJSON_CreateBool(tokenPresent));
     if (pSlotList == NULL) {
-        json_object_array_add(args, json_object_new_uint64(0));
+        cJSON_AddItemToArray(args, cJSON_CreateNumber(0));
     } else {
-        json_object_array_add(args, json_object_new_uint64(*pulCount));
+        cJSON_AddItemToArray(args, cJSON_CreateNumber(*pulCount));
     }
 
     rv = INVOKE(args, &ret);
 
-    if (!json_object_is_type(ret, json_type_object)) {
+    if (!cJSON_IsObject(ret)) {
         rv = CKR_FUNCTION_FAILED;
         goto out;
     }
 
-    json_object *jcnt;
-    if (json_object_object_get_ex(ret, "cnt", &jcnt)) {
-        *pulCount = json_object_get_uint64(jcnt);
-    }
-
-    json_object *list;
-    if (!json_object_object_get_ex(ret, "list", &list)) {
-        goto out;
-    }
+    CK_ULONG start_count = *pulCount;
+    FILL_INT_BY_JSON(ret, "cnt", *pulCount);
 
     if (pSlotList != NULL) {
-        size_t len = json_object_array_length(list);
-        for (size_t i = 0; i < len; i++) {
-            json_object *id = json_object_array_get_idx(list, i);
-            pSlotList[i] = json_object_get_uint64(id);
+        cJSON *list = cJSON_GetObjectItem(ret, "list");
+        cJSON *id;
+        size_t i = 0;
+        cJSON_ArrayForEach(id, list)
+        {
+            if (cJSON_IsNumber(id)) {
+                if (i >= start_count) {
+                    rv = CKR_BUFFER_TOO_SMALL;
+                    goto out;
+                }
+                pSlotList[i++] = id->valuedouble;
+            }
         }
     }
 out:
-    json_object_put(args);
-    json_object_put(ret);
+    cJSON_Delete(args);
+    cJSON_Delete(ret);
     return rv;
 }
 
 CK_RV C_GetSlotInfo(CK_SLOT_ID slotID, CK_SLOT_INFO_PTR pInfo)
 {
-    json_object *args = NULL, *ret = NULL;
+    cJSON *args = NULL, *ret = NULL;
     CK_RV rv;
 
     if (pInfo == NULL) {
         return CKR_ARGUMENTS_BAD;
     }
 
-    args = json_object_new_array();
-    json_object_array_add(args, json_object_new_uint64(slotID));
+    args = cJSON_CreateArray();
+    cJSON_AddItemToArray(args, cJSON_CreateNumber(slotID));
 
     if ((rv = INVOKE(args, &ret)) != CKR_OK) {
         goto out;
@@ -178,22 +151,22 @@ CK_RV C_GetSlotInfo(CK_SLOT_ID slotID, CK_SLOT_INFO_PTR pInfo)
     FILL_VERSION_BY_JSON(ret, "hardwareVersion", pInfo->hardwareVersion);
     FILL_VERSION_BY_JSON(ret, "firmwareVersion", pInfo->firmwareVersion);
 out:
-    json_object_put(args);
-    json_object_put(ret);
+    cJSON_Delete(args);
+    cJSON_Delete(ret);
     return rv;
 }
 
 CK_RV C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo)
 {
-    json_object *args = NULL, *ret = NULL;
+    cJSON *args = NULL, *ret = NULL;
     CK_RV rv;
 
     if (pInfo == NULL) {
         return CKR_ARGUMENTS_BAD;
     }
 
-    args = json_object_new_array();
-    json_object_array_add(args, json_object_new_uint64(slotID));
+    args = cJSON_CreateArray();
+    cJSON_AddItemToArray(args, cJSON_CreateNumber(slotID));
 
     if ((rv = INVOKE(args, &ret)) != CKR_OK) {
         goto out;
@@ -218,8 +191,8 @@ CK_RV C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo)
     FILL_VERSION_BY_JSON(ret, "firmwareVersion", pInfo->firmwareVersion);
     FILL_STRING_BY_JSON(ret, "utcTime", pInfo->utcTime);
 out:
-    json_object_put(args);
-    json_object_put(ret);
+    cJSON_Delete(args);
+    cJSON_Delete(ret);
     return rv;
 }
 
@@ -284,50 +257,55 @@ CK_RV C_OpenSession(CK_SLOT_ID slotID, CK_FLAGS flags, CK_VOID_PTR pApplication,
 {
     UNUSED(pApplication);
     UNUSED(Notify);
-    json_object *args = NULL, *ret = NULL;
+    cJSON *args = NULL, *ret = NULL;
     CK_RV rv;
 
     if (phSession == NULL) {
         return CKR_ARGUMENTS_BAD;
     }
 
-    args = json_object_new_array();
-    json_object_array_add(args, json_object_new_uint64(slotID));
-    json_object_array_add(args, json_object_new_uint64(flags));
+    args = cJSON_CreateArray();
+    cJSON_AddItemToArray(args, cJSON_CreateNumber(slotID));
+    cJSON_AddItemToArray(args, cJSON_CreateNumber(flags));
 
     if ((rv = INVOKE(args, &ret)) != CKR_OK) {
         goto out;
     }
-    *phSession = json_object_get_uint64(ret);
+
+    if (!cJSON_IsNumber(ret)) {
+        *phSession = ret->valuedouble;
+    } else {
+        rv = CKR_FUNCTION_FAILED;
+    }
 out:
-    json_object_put(args);
-    json_object_put(ret);
+    cJSON_Delete(args);
+    cJSON_Delete(ret);
     return rv;
 }
 
 CK_RV C_CloseSession(CK_SESSION_HANDLE hSession)
 {
-    json_object *args = NULL;
+    cJSON *args = NULL;
     CK_RV rv;
 
-    args = json_object_new_array();
-    json_object_array_add(args, json_object_new_uint64(hSession));
+    args = cJSON_CreateArray();
+    cJSON_AddItemToArray(args, cJSON_CreateNumber(hSession));
 
     rv = INVOKE(args, NULL);
-    json_object_put(args);
+    cJSON_Delete(args);
     return rv;
 }
 
 CK_RV C_CloseAllSessions(CK_SLOT_ID slotID)
 {
-    json_object *args = NULL;
+    cJSON *args = NULL;
     CK_RV rv;
 
-    args = json_object_new_array();
-    json_object_array_add(args, json_object_new_uint64(slotID));
+    args = cJSON_CreateArray();
+    cJSON_AddItemToArray(args, cJSON_CreateNumber(slotID));
 
     rv = INVOKE(args, NULL);
-    json_object_put(args);
+    cJSON_Delete(args);
     return rv;
 }
 
@@ -366,32 +344,32 @@ CK_RV C_SetOperationState(
 
 CK_RV C_Login(CK_SESSION_HANDLE hSession, CK_USER_TYPE userType, CK_UTF8CHAR_PTR pPin, CK_ULONG ulPinLen)
 {
-    json_object *args = NULL;
+    cJSON *args = NULL;
     CK_RV rv;
-    json_object *pin = json_object_new_string_len((char *)pPin, ulPinLen);
+    char *pin = strndup((char *)pPin, ulPinLen);
 
-    args = json_object_new_array();
-    json_object_array_add(args, json_object_new_uint64(hSession));
-    json_object_array_add(args, json_object_new_uint64(userType));
-    json_object_array_add(args, pin);
+    args = cJSON_CreateArray();
+    cJSON_AddItemToArray(args, cJSON_CreateNumber(hSession));
+    cJSON_AddItemToArray(args, cJSON_CreateNumber(userType));
+    cJSON_AddItemToArray(args, cJSON_CreateStringReference(pin));
 
     rv = INVOKE_SAFE(args, NULL);
 
-    memset((char *)json_object_get_string(pin), '*', json_object_get_string_len(pin));
-    json_object_put(args);
+    memset(pin, '*', ulPinLen);
+    cJSON_Delete(args);
     return rv;
 }
 
 CK_RV C_Logout(CK_SESSION_HANDLE hSession)
 {
-    json_object *args = NULL;
+    cJSON *args = NULL;
     CK_RV rv;
 
-    args = json_object_new_array();
-    json_object_array_add(args, json_object_new_uint64(hSession));
+    args = cJSON_CreateArray();
+    cJSON_AddItemToArray(args, cJSON_CreateNumber(hSession));
 
     rv = INVOKE(args, NULL);
-    json_object_put(args);
+    cJSON_Delete(args);
     return rv;
 }
 
@@ -435,65 +413,61 @@ CK_RV C_GetObjectSize(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject, CK_U
 
 CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject, CK_ATTRIBUTE_PTR pTemplate, CK_ULONG ulCount)
 {
-    json_object *args = NULL, *ret = NULL;
+    cJSON *args = NULL, *ret = NULL;
     CK_RV rv;
 
     if (pTemplate == NULL || ulCount == 0) {
         return CKR_ARGUMENTS_BAD;
     }
 
-    args = json_object_new_array();
-    json_object_array_add(args, json_object_new_uint64(hSession));
-    json_object_array_add(args, json_object_new_uint64(hObject));
+    args = cJSON_CreateArray();
+    cJSON_AddItemToArray(args, cJSON_CreateNumber(hSession));
+    cJSON_AddItemToArray(args, cJSON_CreateNumber(hObject));
 
-    json_object *objs = json_object_new_array();
-    json_object_array_add(args, objs);
+    cJSON *objs = cJSON_CreateArray();
+    cJSON_AddItemToArray(args, objs);
     for (CK_ULONG i = 0; i < ulCount; i++) {
-        json_object *tmp = json_object_new_object();
-        json_object_object_add(tmp, "type", json_object_new_uint64(pTemplate[i].type));
+        cJSON *tmp = cJSON_CreateObject();
+        cJSON_AddItemToArray(objs, tmp);
+
+        cJSON_AddNumberToObject(tmp, "type", pTemplate[i].type);
         if (pTemplate[i].pValue == NULL) {
-            json_object_object_add(tmp, "valueLen", json_object_new_uint64(0));
+            cJSON_AddNumberToObject(tmp, "valueLen", 0);
         } else {
-            json_object_object_add(tmp, "valueLen", json_object_new_uint64(pTemplate[i].ulValueLen));
+            cJSON_AddNumberToObject(tmp, "valueLen", pTemplate[i].ulValueLen);
         }
-        json_object_array_add(objs, tmp);
     }
 
     rv = INVOKE(args, &ret);
 
-    if (!json_object_is_type(ret, json_type_array)) {
+    if (!cJSON_IsArray(ret)) {
         rv = CKR_FUNCTION_FAILED;
         goto out;
     }
 
-    size_t len = json_object_array_length(ret);
-    for (size_t i = 0; i < len; i++) {
+    cJSON *tmp;
+    CK_ULONG i = 0;
+    cJSON_ArrayForEach(tmp, ret)
+    {
         CK_ULONG new_len, dummy;
-        json_object *str;
-
-        json_object *tmp = json_object_array_get_idx(ret, i);
         FILL_INT_BY_JSON(tmp, "type", pTemplate[i].type);
         FILL_INT_BY_JSON(tmp, "valueLen", new_len);
 
-        // just request length
-        if (!json_object_object_get_ex(tmp, "value", &str)) {
-            pTemplate[i].ulValueLen = new_len;
-            continue;
+        cJSON *val = cJSON_GetObjectItem(tmp, "value");
+        if (cJSON_IsString(val)) {
+            mbedtls_base64_decode(
+                pTemplate[i].pValue,
+                pTemplate[i].ulValueLen,
+                &dummy,
+                (unsigned char *)val->string,
+                strlen(val->string));
         }
-        if (new_len > pTemplate[i].ulValueLen) {
-            continue;
-        }
-        mbedtls_base64_decode(
-            pTemplate[i].pValue,
-            pTemplate[i].ulValueLen,
-            &dummy,
-            (unsigned char *)json_object_get_string(str),
-            json_object_get_string_len(str));
         pTemplate[i].ulValueLen = new_len;
+        i++;
     }
 out:
-    json_object_put(args);
-    json_object_put(ret);
+    cJSON_Delete(args);
+    cJSON_Delete(ret);
     return rv;
 }
 
@@ -509,7 +483,7 @@ CK_RV C_SetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject, 
 
 CK_RV C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, CK_ULONG ulCount)
 {
-    json_object *args = NULL;
+    cJSON *args = NULL;
     CK_RV rv;
     char buf[MAX_CRYPTO_OBJ_SIZE];
     size_t str_len;
@@ -518,69 +492,73 @@ CK_RV C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, 
         return CKR_ARGUMENTS_BAD;
     }
 
-    args = json_object_new_array();
-    json_object_array_add(args, json_object_new_uint64(hSession));
+    args = cJSON_CreateArray();
+    cJSON_AddItemToArray(args, cJSON_CreateNumber(hSession));
 
-    json_object *objs = json_object_new_array();
-    json_object_array_add(args, objs);
+    cJSON *objs = cJSON_CreateArray();
+    cJSON_AddItemToArray(args, objs);
     for (CK_ULONG i = 0; i < ulCount; i++) {
         if (mbedtls_base64_encode((unsigned char *)buf, sizeof(buf), &str_len, pTemplate[i].pValue, pTemplate[i].ulValueLen) != 0) {
             DBG("buffer too small");
             rv = CKR_FUNCTION_FAILED;
             goto out;
         }
-        json_object *tmp = json_object_new_object();
-        json_object_object_add(tmp, "type", json_object_new_uint64(pTemplate[i].type));
-        json_object_object_add(tmp, "value", json_object_new_string_len(buf, str_len));
-        json_object_object_add(tmp, "valueLen", json_object_new_uint64(pTemplate[i].ulValueLen));
-        json_object_array_add(objs, tmp);
+        buf[str_len] = '\0';
+        cJSON *tmp = cJSON_CreateObject();
+        cJSON_AddItemToArray(objs, tmp);
+
+        cJSON_AddNumberToObject(tmp, "type", pTemplate[i].type);
+        cJSON_AddStringToObject(tmp, "value", buf);
+        cJSON_AddNumberToObject(tmp, "valueLen", pTemplate[i].ulValueLen);
     }
 
     rv = INVOKE(args, NULL);
 out:
-    json_object_put(args);
+    cJSON_Delete(args);
     return rv;
 }
 
 CK_RV C_FindObjects(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE_PTR phObject, CK_ULONG ulMaxObjectCount, CK_ULONG_PTR pulObjectCount)
 {
-    json_object *args = NULL, *ret = NULL;
+    cJSON *args = NULL, *ret = NULL;
     CK_RV rv;
 
     if (phObject == NULL || ulMaxObjectCount == 0 || pulObjectCount == NULL) {
         return CKR_ARGUMENTS_BAD;
     }
 
-    args = json_object_new_array();
-    json_object_array_add(args, json_object_new_uint64(hSession));
-    json_object_array_add(args, json_object_new_uint64(ulMaxObjectCount));
+    args = cJSON_CreateArray();
+    cJSON_AddItemToArray(args, cJSON_CreateNumber(hSession));
+    cJSON_AddItemToArray(args, cJSON_CreateNumber(ulMaxObjectCount));
 
     if ((rv = INVOKE(args, &ret)) != CKR_OK) {
         goto out;
     }
 
-    *pulObjectCount = json_object_array_length(ret);
-    for (CK_ULONG i = 0; i < *pulObjectCount; i++) {
-        json_object *id = json_object_array_get_idx(ret, i);
-        phObject[i] = json_object_get_uint64(id);
+    cJSON *id;
+    cJSON_ArrayForEach(id, ret)
+    {
+        if (cJSON_IsNumber(id)) {
+            phObject[*pulObjectCount++] = id->valuedouble;
+        }
     }
 out:
-    json_object_put(args);
-    json_object_put(ret);
+    cJSON_Delete(args);
+    cJSON_Delete(ret);
     return rv;
 }
 
 CK_RV C_FindObjectsFinal(CK_SESSION_HANDLE hSession)
 {
-    json_object *args = NULL;
+    cJSON *args = NULL;
     CK_RV rv;
 
-    args = json_object_new_array();
-    json_object_array_add(args, json_object_new_uint64(hSession));
+    args = cJSON_CreateArray();
+    cJSON_AddItemToArray(args, cJSON_CreateNumber(hSession));
 
     rv = INVOKE(args, NULL);
 
-    json_object_put(args);
+    cJSON_Delete(args);
     return rv;
 }
 
@@ -711,7 +689,7 @@ CK_RV C_DigestFinal(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pDigest, CK_ULONG_PT
 
 CK_RV C_SignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJECT_HANDLE hKey)
 {
-    json_object *args = NULL;
+    cJSON *args = NULL;
     char buf[MAX_CRYPTO_OBJ_SIZE];
     size_t str_len;
     CK_RV rv;
@@ -720,30 +698,31 @@ CK_RV C_SignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJ
         return CKR_ARGUMENTS_BAD;
     }
 
-    json_object *mech = json_object_new_object();
-    args = json_object_new_array();
-    json_object_array_add(args, json_object_new_uint64(hSession));
-    json_object_array_add(args, mech);
-    json_object_array_add(args, json_object_new_uint64(hKey));
+    cJSON *mech = cJSON_CreateObject();
+    args = cJSON_CreateArray();
+    cJSON_AddItemToArray(args, cJSON_CreateNumber(hSession));
+    cJSON_AddItemToArray(args, mech);
+    cJSON_AddItemToArray(args, cJSON_CreateNumber(hKey));
 
-    json_object_object_add(mech, "mechanism", json_object_new_uint64(pMechanism->mechanism));
+    cJSON_AddNumberToObject(mech, "mechanism", pMechanism->mechanism);
     if (mbedtls_base64_encode((unsigned char *)buf, sizeof(buf), &str_len, pMechanism->pParameter, pMechanism->ulParameterLen) != 0) {
         DBG("buffer too small");
         rv = CKR_FUNCTION_FAILED;
         goto out;
     } else {
-        json_object_object_add(mech, "parameter", json_object_new_string_len(buf, str_len));
+        buf[str_len] = '\0';
+        cJSON_AddStringToObject(mech, "parameter", buf);
     }
 
     rv = INVOKE(args, NULL);
 out:
-    json_object_put(args);
+    cJSON_Delete(args);
     return rv;
 }
 
 CK_RV C_Sign(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG ulDataLen, CK_BYTE_PTR pSignature, CK_ULONG_PTR pulSignatureLen)
 {
-    json_object *args = NULL, *ret = NULL, *str;
+    cJSON *args = NULL, *ret = NULL;
     char buf[MAX_CRYPTO_OBJ_SIZE];
     size_t str_len;
     CK_ULONG new_len, dummy;
@@ -754,44 +733,36 @@ CK_RV C_Sign(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG ulDataLen, 
         rv = CKR_FUNCTION_FAILED;
         goto out;
     }
+    buf[str_len] = '\0';
 
-    args = json_object_new_array();
-    json_object_array_add(args, json_object_new_uint64(hSession));
-    json_object_array_add(args, json_object_new_string_len(buf, str_len));
-    json_object_array_add(args, json_object_new_uint64(*pulSignatureLen));
+    args = cJSON_CreateArray();
+    cJSON_AddItemToArray(args, cJSON_CreateNumber(hSession));
+    cJSON_AddItemToArray(args, cJSON_CreateString(buf));
+    cJSON_AddItemToArray(args, cJSON_CreateNumber(*pulSignatureLen));
 
     rv = INVOKE(args, &ret);
 
     FILL_INT_BY_JSON(ret, "signLen", new_len);
 
-    // just request length
-    if (!json_object_object_get_ex(ret, "sign", &str)) {
-        *pulSignatureLen = new_len;
-        goto out;
-    }
-    if (new_len > *pulSignatureLen) {
-        rv = CKR_BUFFER_TOO_SMALL;
-        goto out;
-    }
-    if (mbedtls_base64_decode(
+    cJSON *sign = cJSON_GetObjectItem(ret, "sign");
+    if (cJSON_IsString(sign)) {
+        mbedtls_base64_decode(
             pSignature,
             *pulSignatureLen,
             &dummy,
-            (unsigned char *)json_object_get_string(str),
-            json_object_get_string_len(str))
-        != 0) {
-        rv = CKR_BUFFER_TOO_SMALL;
+            (unsigned char *)sign->string,
+            strlen(sign->string));
     }
     *pulSignatureLen = new_len;
 out:
-    json_object_put(args);
-    json_object_put(ret);
+    cJSON_Delete(args);
+    cJSON_Delete(ret);
     return rv;
 }
 
 CK_RV C_SignUpdate(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pPart, CK_ULONG ulPartLen)
 {
-    json_object *args = NULL;
+    cJSON *args = NULL;
     char buf[MAX_CRYPTO_OBJ_SIZE];
     size_t str_len;
     CK_RV rv;
@@ -801,52 +772,44 @@ CK_RV C_SignUpdate(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pPart, CK_ULONG ulPar
         rv = CKR_FUNCTION_FAILED;
         goto out;
     }
+    buf[str_len] = '\0';
 
-    args = json_object_new_array();
-    json_object_array_add(args, json_object_new_uint64(hSession));
-    json_object_array_add(args, json_object_new_string_len(buf, str_len));
+    args = cJSON_CreateArray();
+    cJSON_AddItemToArray(args, cJSON_CreateNumber(hSession));
+    cJSON_AddItemToArray(args, cJSON_CreateString(buf));
 
     rv = INVOKE(args, NULL);
 out:
-    json_object_put(args);
+    cJSON_Delete(args);
     return rv;
 }
 
 CK_RV C_SignFinal(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pSignature, CK_ULONG_PTR pulSignatureLen)
 {
-    json_object *args = NULL, *ret = NULL, *str;
+    cJSON *args = NULL, *ret = NULL;
     CK_ULONG new_len, dummy;
     CK_RV rv;
 
-    args = json_object_new_array();
-    json_object_array_add(args, json_object_new_uint64(hSession));
+    args = cJSON_CreateArray();
+    cJSON_AddItemToArray(args, cJSON_CreateNumber(hSession));
 
     rv = INVOKE(args, &ret);
 
     FILL_INT_BY_JSON(ret, "signLen", new_len);
 
-    // just request length
-    if (!json_object_object_get_ex(ret, "sign", &str)) {
-        *pulSignatureLen = new_len;
-        goto out;
-    }
-    if (new_len > *pulSignatureLen) {
-        rv = CKR_BUFFER_TOO_SMALL;
-        goto out;
-    }
-    if (mbedtls_base64_decode(
+    cJSON *sign = cJSON_GetObjectItem(ret, "sign");
+    if (cJSON_IsString(sign)) {
+        mbedtls_base64_decode(
             pSignature,
             *pulSignatureLen,
             &dummy,
-            (unsigned char *)json_object_get_string(str),
-            json_object_get_string_len(str))
-        != 0) {
-        rv = CKR_BUFFER_TOO_SMALL;
+            (unsigned char *)sign->string,
+            strlen(sign->string));
     }
     *pulSignatureLen = new_len;
-out:
-    json_object_put(args);
-    json_object_put(ret);
+
+    cJSON_Delete(args);
+    cJSON_Delete(ret);
     return rv;
 }
 

@@ -35,8 +35,8 @@ ExternalProject_Get_Property(curl INSTALL_DIR)
 set(CURL_INCLUDE ${INSTALL_DIR}/include)
 set(CURL_LIB ${INSTALL_DIR}/lib)
 
-ExternalProject_Add(json-c
-    URL  https://github.com/json-c/json-c/archive/refs/tags/json-c-0.16-20220414.tar.gz
+ExternalProject_Add(cjson
+    URL  https://github.com/DaveGamble/cJSON/archive/refs/tags/v1.7.15.tar.gz
     CMAKE_ARGS
         -DBUILD_SHARED_LIBS=OFF
         -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
@@ -44,11 +44,11 @@ ExternalProject_Add(json-c
         -DCMAKE_BUILD_TYPE=Release
     UPDATE_COMMAND ""
 )
-ExternalProject_Get_Property(json-c INSTALL_DIR)
-set(JSONC_INCLUDE ${INSTALL_DIR}/include)
-set(JSONC_LIB ${INSTALL_DIR}/lib)
+ExternalProject_Get_Property(cjson INSTALL_DIR)
+set(CJSON_INCLUDE ${INSTALL_DIR}/include)
+set(CJSON_LIB ${INSTALL_DIR}/lib)
 
-include_directories(${CURL_INCLUDE} ${JSONC_INCLUDE} ${MBEDTLS_ROOT}/include)
+include_directories(${CJSON_INCLUDE} ${CURL_INCLUDE} ${MBEDTLS_ROOT}/include)
 if(MSVC)
     add_compile_options(/W4 /WX)
 else()
@@ -57,10 +57,10 @@ else()
 endif()
 
 add_library(rpkcs11 SHARED http.c lib.c utils.c)
-add_dependencies(rpkcs11 curl json-c)
+add_dependencies(rpkcs11 cjson curl)
 target_link_libraries(rpkcs11
+    ${CJSON_LIB}/libcjson.a
     ${CURL_LIB}/libcurl.a
-    ${JSONC_LIB}/libjson-c.a
     ${MBEDTLS_ROOT}/lib/libmbedtls.a
     ${MBEDTLS_ROOT}/lib/libmbedx509.a
     ${MBEDTLS_ROOT}/lib/libmbedcrypto.a
