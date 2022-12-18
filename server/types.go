@@ -16,6 +16,9 @@ const (
 	CKR_FUNCTION_FAILED              = C.CKR_FUNCTION_FAILED
 	CKR_CRYPTOKI_NOT_INITIALIZED     = C.CKR_CRYPTOKI_NOT_INITIALIZED
 	CKR_CRYPTOKI_ALREADY_INITIALIZED = C.CKR_CRYPTOKI_ALREADY_INITIALIZED
+
+	hostUlongLen = uint(C.sizeof_CK_ULONG)
+	netUlongLen  = uint(4)
 )
 
 type pkcs11_err uint
@@ -85,18 +88,38 @@ type ckSignData struct {
 	SignLen uint   `json:"signLen"`
 }
 
+type integer interface {
+	~int | ~int8 | ~int16 | ~int32 | ~int64 | ~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr
+}
+
+func min[T integer](a, b T) T {
+	if a < b {
+		return a
+	} else {
+		return b
+	}
+}
+
+func max[T integer](a, b T) T {
+	if a > b {
+		return a
+	} else {
+		return b
+	}
+}
+
 func (e pkcs11_err) Error() string {
 	return fmt.Sprintf("pkcs11 error: 0x%X", uint(e))
 }
 
-func wrapError(rv C.CK_RV) error {
+func unwrapError(rv C.CK_RV) error {
 	if rv == C.CKR_OK {
 		return nil
 	}
 	return pkcs11_err(rv)
 }
 
-func wrapVersion(version C.CK_VERSION) ckVersion {
+func unwrapVersion(version C.CK_VERSION) ckVersion {
 	return ckVersion{byte(version.major), byte(version.minor)}
 }
 
@@ -107,21 +130,84 @@ func wrapBool(x bool) C.CK_BBOOL {
 	return C.CK_FALSE
 }
 
-func wrapAttributeArr(arr []ckAttribute) (func(), *C.rsc_unpacked_attribute, C.CK_ULONG) {
-	pArr := make([]C.rsc_unpacked_attribute, len(arr))
-	ptrs := make([]unsafe.Pointer, len(arr))
-	for i, a := range arr {
-		pArr[i]._type = C.CK_ATTRIBUTE_TYPE(a.Type)
-		if len(a.Value) > 0 {
-			ptrs[i] = C.CBytes(a.Value)
-			pArr[i].pValue = C.CK_VOID_PTR(ptrs[i])
-			pArr[i].ulValueLen = C.CK_ULONG(len(a.Value))
+func allocAttributeArr(nattr []ckAttribute) (func(), []C.CK_ATTRIBUTE) {
+	hattr := make([]C.CK_ATTRIBUTE, len(nattr))
+	for i, a := range nattr {
+		hattr[i]._type = C.CK_ATTRIBUTE_TYPE(a.Type)
+		len := a.ValueLen
+
+		if len == 0 {
+			continue
 		}
+
+		switch hattr[i]._type {
+		case C.CKA_CLASS:
+		case C.CKA_CERTIFICATE_TYPE:
+		case C.CKA_KEY_TYPE:
+		case C.CKA_MODULUS_BITS:
+			len = max(len, hostUlongLen)
+		}
+
+		C.rsc_set_attribute_value(&hattr[i], C.CK_VOID_PTR(C.malloc(C.size_t(len))))
+		hattr[i].ulValueLen = C.CK_ULONG(len)
 	}
 	return func() {
-			for _, p := range ptrs {
-				C.free(p)
+			for _, a := range hattr {
+				C.free(unsafe.Pointer(C.rsc_get_attribute_value(&a)))
 			}
 		},
-		&pArr[0], C.CK_ULONG(len(arr))
+		hattr
+}
+
+func wrapAttributeArr(nattr []ckAttribute) (func(), []C.CK_ATTRIBUTE) {
+	hattr := make([]C.CK_ATTRIBUTE, len(nattr))
+	for i, a := range nattr {
+		hattr[i]._type = C.CK_ATTRIBUTE_TYPE(a.Type)
+		len := a.ValueLen
+
+		if len == 0 {
+			continue
+		}
+
+		switch hattr[i]._type {
+		case C.CKA_CLASS:
+		case C.CKA_CERTIFICATE_TYPE:
+		case C.CKA_KEY_TYPE:
+		case C.CKA_MODULUS_BITS:
+			len = max(len, hostUlongLen)
+		}
+
+		C.rsc_set_attribute_value(&hattr[i], C.CK_VOID_PTR(C.CBytes(a.Value[:len])))
+		hattr[i].ulValueLen = C.CK_ULONG(len)
+	}
+	return func() {
+			for _, a := range hattr {
+				C.free(unsafe.Pointer(C.rsc_get_attribute_value(&a)))
+			}
+		},
+		hattr
+}
+
+func unWrapAttributeArr(hattr []C.CK_ATTRIBUTE) []ckAttribute {
+	nattr := make([]ckAttribute, len(hattr))
+	for i, a := range hattr {
+		nattr[i].Type = uint(a._type)
+		len := uint(a.ulValueLen)
+
+		if len == 0 {
+			continue
+		}
+
+		switch a._type {
+		case C.CKA_CLASS:
+		case C.CKA_CERTIFICATE_TYPE:
+		case C.CKA_KEY_TYPE:
+		case C.CKA_MODULUS_BITS:
+			len = min(len, netUlongLen)
+		}
+
+		nattr[i].Value = C.GoBytes(unsafe.Pointer(C.rsc_get_attribute_value(&a)), C.int(len))
+		nattr[i].ValueLen = len
+	}
+	return nattr
 }

@@ -34,23 +34,23 @@ func (c *pkcs11_ctx) Close() {
 }
 
 func (c *pkcs11_ctx) Initialize() error {
-	return wrapError(C.rsc_Initialize(c.ctx))
+	return unwrapError(C.rsc_Initialize(c.ctx))
 }
 
 func (c *pkcs11_ctx) Finalize() error {
-	return wrapError(C.rsc_Finalize(c.ctx))
+	return unwrapError(C.rsc_Finalize(c.ctx))
 }
 
 func (c *pkcs11_ctx) GetInfo() (ckInfo, error) {
-	var info C.rsc_unpacked_info
+	var info C.CK_INFO
 	rv := C.rsc_GetInfo(c.ctx, &info)
 	return ckInfo{
-		CryptokiVersion:    wrapVersion(info.cryptokiVersion),
+		CryptokiVersion:    unwrapVersion(info.cryptokiVersion),
 		ManufacturerID:     strings.TrimRight(C.GoStringN((*C.char)(unsafe.Pointer(&info.manufacturerID[0])), 32), " "),
-		Flags:              uint(info.flags),
+		Flags:              uint(C.rsc_get_info_flags(&info)),
 		LibraryDescription: strings.TrimRight(C.GoStringN((*C.char)(unsafe.Pointer(&info.libraryDescription[0])), 32), " "),
-		LibraryVersion:     wrapVersion(info.libraryVersion),
-	}, wrapError(rv)
+		LibraryVersion:     unwrapVersion(info.libraryVersion),
+	}, unwrapError(rv)
 }
 
 func (c *pkcs11_ctx) GetSlotList(tokenPresent bool, cnt uint) (ckSlotList, error) {
@@ -72,7 +72,7 @@ func (c *pkcs11_ctx) GetSlotList(tokenPresent bool, cnt uint) (ckSlotList, error
 		}
 		C.free(unsafe.Pointer(pSlotList))
 	}
-	return res, wrapError(rv)
+	return res, unwrapError(rv)
 }
 
 func (c *pkcs11_ctx) GetSlotInfo(slotID uint) (ckSlotInfo, error) {
@@ -82,9 +82,9 @@ func (c *pkcs11_ctx) GetSlotInfo(slotID uint) (ckSlotInfo, error) {
 		SlotDescription: strings.TrimRight(C.GoStringN((*C.char)(unsafe.Pointer(&info.slotDescription[0])), 64), " "),
 		ManufacturerID:  strings.TrimRight(C.GoStringN((*C.char)(unsafe.Pointer(&info.manufacturerID[0])), 32), " "),
 		Flags:           uint(info.flags),
-		HardwareVersion: wrapVersion(info.hardwareVersion),
-		FirmwareVersion: wrapVersion(info.firmwareVersion),
-	}, wrapError(rv)
+		HardwareVersion: unwrapVersion(info.hardwareVersion),
+		FirmwareVersion: unwrapVersion(info.firmwareVersion),
+	}, unwrapError(rv)
 }
 
 func (c *pkcs11_ctx) GetTokenInfo(slotID uint) (ckTokenInfo, error) {
@@ -106,64 +106,49 @@ func (c *pkcs11_ctx) GetTokenInfo(slotID uint) (ckTokenInfo, error) {
 		FreePublicMemory:   uint(info.ulFreePublicMemory),
 		TotalPrivateMemory: uint(info.ulTotalPrivateMemory),
 		FreePrivateMemory:  uint(info.ulFreePrivateMemory),
-		HardwareVersion:    wrapVersion(info.hardwareVersion),
-		FirmwareVersion:    wrapVersion(info.firmwareVersion),
+		HardwareVersion:    unwrapVersion(info.hardwareVersion),
+		FirmwareVersion:    unwrapVersion(info.firmwareVersion),
 		UTCTime:            strings.TrimRight(C.GoStringN((*C.char)(unsafe.Pointer(&info.utcTime[0])), 16), " "),
-	}, wrapError(rv)
+	}, unwrapError(rv)
 }
 
 func (c *pkcs11_ctx) OpenSession(slotID uint, flags uint) (ckSessionHandle, error) {
 	var phSession C.CK_SESSION_HANDLE
 	rv := C.rsc_OpenSession(c.ctx, C.CK_SLOT_ID(slotID), C.CK_FLAGS(flags), C.CK_SESSION_HANDLE_PTR(&phSession))
-	return ckSessionHandle(phSession), wrapError(rv)
+	return ckSessionHandle(phSession), unwrapError(rv)
 }
 
 func (c *pkcs11_ctx) CloseSession(sess ckSessionHandle) error {
-	return wrapError(C.rsc_CloseSession(c.ctx, C.CK_SESSION_HANDLE(sess)))
+	return unwrapError(C.rsc_CloseSession(c.ctx, C.CK_SESSION_HANDLE(sess)))
 }
 
 func (c *pkcs11_ctx) CloseAllSessions(slotID uint) error {
-	return wrapError(C.rsc_CloseAllSessions(c.ctx, C.CK_SLOT_ID(slotID)))
+	return unwrapError(C.rsc_CloseAllSessions(c.ctx, C.CK_SLOT_ID(slotID)))
 }
 
 func (c *pkcs11_ctx) Login(sess ckSessionHandle, userType uint, pin string) error {
 	cpin := C.CString(pin)
 	defer C.free(unsafe.Pointer(cpin))
-	return wrapError(C.rsc_Login(c.ctx, C.CK_SESSION_HANDLE(sess), C.CK_USER_TYPE(userType), cpin, C.CK_ULONG(len(pin))))
+	return unwrapError(C.rsc_Login(c.ctx, C.CK_SESSION_HANDLE(sess), C.CK_USER_TYPE(userType), cpin, C.CK_ULONG(len(pin))))
 }
 
 func (c *pkcs11_ctx) Logout(sess ckSessionHandle) error {
-	return wrapError(C.rsc_Logout(c.ctx, C.CK_SESSION_HANDLE(sess)))
+	return unwrapError(C.rsc_Logout(c.ctx, C.CK_SESSION_HANDLE(sess)))
 }
 
-func (c *pkcs11_ctx) GetAttributeValue(sess ckSessionHandle, obj ckObjectHandle, attr []ckAttribute) ([]ckAttribute, error) {
-	cattr := make([]C.rsc_unpacked_attribute, len(attr))
-	for i, a := range attr {
-		cattr[i]._type = C.CK_ATTRIBUTE_TYPE(a.Type)
-		cattr[i].ulValueLen = C.CK_ULONG(a.ValueLen)
-		if a.ValueLen > 0 {
-			cattr[i].pValue = C.CK_VOID_PTR(C.malloc(C.size_t(a.ValueLen) * C.sizeof_CK_BYTE))
-		}
-	}
-
-	rv := C.rsc_GetAttributeValue(c.ctx, C.CK_SESSION_HANDLE(sess), C.CK_OBJECT_HANDLE(obj), &cattr[0], C.CK_ULONG(len(cattr)))
-
-	res := make([]ckAttribute, len(cattr))
-	for i, a := range cattr {
-		res[i].Type = uint(a._type)
-		res[i].ValueLen = uint(a.ulValueLen)
-		if a.pValue != nil {
-			res[i].Value = C.GoBytes(unsafe.Pointer(a.pValue), C.int(a.ulValueLen))
-			C.free(unsafe.Pointer(a.pValue))
-		}
-	}
-	return res, wrapError(rv)
-}
-
-func (c *pkcs11_ctx) FindObjectsInit(sess ckSessionHandle, pTemplate []ckAttribute) error {
-	gc, tmp, cnt := wrapAttributeArr(pTemplate)
+func (c *pkcs11_ctx) GetAttributeValue(sess ckSessionHandle, obj ckObjectHandle, attrs []ckAttribute) ([]ckAttribute, error) {
+	gc, tmp := allocAttributeArr(attrs)
 	defer gc()
-	return wrapError(C.rsc_FindObjectsInit(c.ctx, C.CK_SESSION_HANDLE(sess), tmp, cnt))
+
+	rv := C.rsc_GetAttributeValue(c.ctx, C.CK_SESSION_HANDLE(sess), C.CK_OBJECT_HANDLE(obj), &tmp[0], C.CK_ULONG(len(attrs)))
+	return unWrapAttributeArr(tmp), unwrapError(rv)
+}
+
+func (c *pkcs11_ctx) FindObjectsInit(sess ckSessionHandle, attrs []ckAttribute) error {
+	gc, tmp := wrapAttributeArr(attrs)
+	defer gc()
+
+	return unwrapError(C.rsc_FindObjectsInit(c.ctx, C.CK_SESSION_HANDLE(sess), &tmp[0], C.CK_ULONG(len(attrs))))
 }
 
 func (c *pkcs11_ctx) FindObjects(sess ckSessionHandle, maxObjs uint) ([]ckObjectHandle, error) {
@@ -171,9 +156,6 @@ func (c *pkcs11_ctx) FindObjects(sess ckSessionHandle, maxObjs uint) ([]ckObject
 	obj := C.CK_OBJECT_HANDLE_PTR(C.malloc(C.size_t(maxObjs) * C.sizeof_CK_OBJECT_HANDLE))
 
 	rv := C.rsc_FindObjects(c.ctx, C.CK_SESSION_HANDLE(sess), obj, C.CK_ULONG(maxObjs), &count)
-	if rv != C.CKR_OK {
-		return nil, wrapError(rv)
-	}
 
 	ul := unsafe.Slice(obj, count)
 	l := make([]ckObjectHandle, count)
@@ -182,11 +164,11 @@ func (c *pkcs11_ctx) FindObjects(sess ckSessionHandle, maxObjs uint) ([]ckObject
 	}
 	C.free(unsafe.Pointer(obj))
 
-	return l, nil
+	return l, unwrapError(rv)
 }
 
 func (c *pkcs11_ctx) FindObjectsFinal(sess ckSessionHandle) error {
-	return wrapError(C.rsc_FindObjectsFinal(c.ctx, C.CK_SESSION_HANDLE(sess)))
+	return unwrapError(C.rsc_FindObjectsFinal(c.ctx, C.CK_SESSION_HANDLE(sess)))
 }
 
 func (c *pkcs11_ctx) SignInit(sess ckSessionHandle, mech ckMechanism, key ckObjectHandle) error {
@@ -196,7 +178,7 @@ func (c *pkcs11_ctx) SignInit(sess ckSessionHandle, mech ckMechanism, key ckObje
 		ulParameterLen: C.CK_ULONG(len(mech.Parameter)),
 	}
 	defer C.free(unsafe.Pointer(cmech.pParameter))
-	return wrapError(C.rsc_SignInit(c.ctx, C.CK_SESSION_HANDLE(sess), cmech, C.CK_OBJECT_HANDLE(key)))
+	return unwrapError(C.rsc_SignInit(c.ctx, C.CK_SESSION_HANDLE(sess), cmech, C.CK_OBJECT_HANDLE(key)))
 }
 
 func (c *pkcs11_ctx) Sign(sess ckSessionHandle, msg []byte, signLen uint) (ckSignData, error) {
@@ -212,13 +194,13 @@ func (c *pkcs11_ctx) Sign(sess ckSessionHandle, msg []byte, signLen uint) (ckSig
 	}
 	rv := C.rsc_Sign(c.ctx, C.CK_SESSION_HANDLE(sess), C.CK_BYTE_PTR(cmsg), C.CK_ULONG(len(msg)), C.CK_BYTE_PTR(sign), &cSignLen)
 
-	return ckSignData{Sign: C.GoBytes(sign, C.int(cSignLen)), SignLen: uint(cSignLen)}, wrapError(rv)
+	return ckSignData{Sign: C.GoBytes(sign, C.int(cSignLen)), SignLen: uint(cSignLen)}, unwrapError(rv)
 }
 
 func (c *pkcs11_ctx) SignUpdate(sess ckSessionHandle, msg []byte) error {
 	cmsg := C.CBytes(msg)
 	defer C.free(cmsg)
-	return wrapError(C.rsc_SignUpdate(c.ctx, C.CK_SESSION_HANDLE(sess), C.CK_BYTE_PTR(cmsg), C.CK_ULONG(len(msg))))
+	return unwrapError(C.rsc_SignUpdate(c.ctx, C.CK_SESSION_HANDLE(sess), C.CK_BYTE_PTR(cmsg), C.CK_ULONG(len(msg))))
 }
 
 func (c *pkcs11_ctx) SignFinal(sess ckSessionHandle, signLen uint) (ckSignData, error) {
@@ -231,5 +213,5 @@ func (c *pkcs11_ctx) SignFinal(sess ckSessionHandle, signLen uint) (ckSignData, 
 	}
 	rv := C.rsc_SignFinal(c.ctx, C.CK_SESSION_HANDLE(sess), C.CK_BYTE_PTR(sign), &cSignLen)
 
-	return ckSignData{Sign: C.GoBytes(sign, C.int(cSignLen)), SignLen: uint(cSignLen)}, wrapError(rv)
+	return ckSignData{Sign: C.GoBytes(sign, C.int(cSignLen)), SignLen: uint(cSignLen)}, unwrapError(rv)
 }

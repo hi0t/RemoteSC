@@ -1,4 +1,5 @@
 #include "pkcs11_api.h"
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -114,19 +115,9 @@ CK_RV rsc_Finalize(rsc_ctx *ctx)
     return ctx->f->C_Finalize(NULL);
 }
 
-CK_RV rsc_GetInfo(rsc_ctx *ctx, rsc_unpacked_info *uInfo)
+CK_RV rsc_GetInfo(rsc_ctx *ctx, CK_INFO_PTR pInfo)
 {
-    CK_INFO pInfo;
-    CK_RV rv = ctx->f->C_GetInfo(&pInfo);
-    if (rv != CKR_OK) {
-        return rv;
-    }
-    uInfo->cryptokiVersion = pInfo.cryptokiVersion;
-    memcpy(uInfo->manufacturerID, pInfo.manufacturerID, sizeof(pInfo.manufacturerID));
-    uInfo->flags = pInfo.flags;
-    memcpy(uInfo->libraryDescription, pInfo.libraryDescription, sizeof(pInfo.libraryDescription));
-    uInfo->libraryVersion = pInfo.libraryVersion;
-    return rv;
+    return ctx->f->C_GetInfo(pInfo);
 }
 
 CK_RV rsc_GetSlotList(rsc_ctx *ctx, CK_BBOOL tokenPresent, CK_SLOT_ID_PTR pSlotList, CK_ULONG_PTR pulCount)
@@ -171,44 +162,14 @@ CK_RV rsc_Logout(rsc_ctx *ctx, CK_SESSION_HANDLE hSession)
     return ctx->f->C_Logout(hSession);
 }
 
-CK_RV rsc_GetAttributeValue(rsc_ctx *ctx, CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject, rsc_unpacked_attribute *uTemplate, CK_ULONG ulCount)
+CK_RV rsc_GetAttributeValue(rsc_ctx *ctx, CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject, CK_ATTRIBUTE_PTR pTemplate, CK_ULONG ulCount)
 {
-    CK_ATTRIBUTE_PTR pTemplate = malloc(ulCount * sizeof(CK_ATTRIBUTE));
-    for (CK_ULONG i = 0; i < ulCount; i++) {
-        pTemplate[i].type = uTemplate[i].type;
-        pTemplate[i].pValue = uTemplate[i].pValue;
-        pTemplate[i].ulValueLen = uTemplate[i].ulValueLen;
-    }
-
-    CK_RV rv = ctx->f->C_GetAttributeValue(hSession, hObject, pTemplate, ulCount);
-
-    for (CK_ULONG i = 0; i < ulCount; i++) {
-        uTemplate[i].type = pTemplate[i].type;
-        uTemplate[i].pValue = pTemplate[i].pValue;
-        uTemplate[i].ulValueLen = pTemplate[i].ulValueLen;
-    }
-    free(pTemplate);
-    return rv;
+    return ctx->f->C_GetAttributeValue(hSession, hObject, pTemplate, ulCount);
 }
 
-CK_RV rsc_FindObjectsInit(rsc_ctx *ctx, CK_SESSION_HANDLE hSession, rsc_unpacked_attribute *uTemplate, CK_ULONG ulCount)
+CK_RV rsc_FindObjectsInit(rsc_ctx *ctx, CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, CK_ULONG ulCount)
 {
-    CK_ATTRIBUTE_PTR pTemplate = malloc(ulCount * sizeof(CK_ATTRIBUTE));
-    for (CK_ULONG i = 0; i < ulCount; i++) {
-        pTemplate[i].type = uTemplate[i].type;
-        pTemplate[i].pValue = uTemplate[i].pValue;
-        pTemplate[i].ulValueLen = uTemplate[i].ulValueLen;
-    }
-
-    CK_RV rv = ctx->f->C_FindObjectsInit(hSession, pTemplate, ulCount);
-
-    for (CK_ULONG i = 0; i < ulCount; i++) {
-        uTemplate[i].type = pTemplate[i].type;
-        uTemplate[i].pValue = pTemplate[i].pValue;
-        uTemplate[i].ulValueLen = pTemplate[i].ulValueLen;
-    }
-    free(pTemplate);
-    return rv;
+    return ctx->f->C_FindObjectsInit(hSession, pTemplate, ulCount);
 }
 
 CK_RV rsc_FindObjects(rsc_ctx *ctx, CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE_PTR phObject, CK_ULONG ulMaxObjectCount, CK_ULONG_PTR pulObjectCount)
