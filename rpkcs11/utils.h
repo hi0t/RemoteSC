@@ -1,11 +1,14 @@
 #pragma once
 
+#include "pkcs11.h"
+
 #include <cjson/cJSON.h>
 #include <stdbool.h>
 #include <stddef.h>
 
 #define UNUSED(x) (void)(x)
 #define DBG(fmt, ...) debug(__func__, __LINE__, fmt, ##__VA_ARGS__)
+#define MAX_CRYPTO_OBJ_SIZE 4096
 
 #define FILL_STRING_BY_JSON(json, key, str)                  \
     do {                                                     \
@@ -43,3 +46,5 @@ void debug(const char *func, int line, const char *fmt, ...);
 void padded_copy(unsigned char *dst, const char *src, size_t dst_size);
 struct rsc_config *parse_config();
 void free_config(struct rsc_config *cfg);
+cJSON *wrapAttributeArr(CK_ATTRIBUTE_PTR attrs, CK_ULONG count, bool getter);
+bool unwrapAttributeArr(cJSON *objs, CK_ATTRIBUTE_PTR attrs, CK_ULONG count);

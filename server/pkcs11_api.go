@@ -137,7 +137,7 @@ func (c *pkcs11_ctx) Logout(sess ckSessionHandle) error {
 }
 
 func (c *pkcs11_ctx) GetAttributeValue(sess ckSessionHandle, obj ckObjectHandle, attrs []ckAttribute) ([]ckAttribute, error) {
-	gc, tmp := allocAttributeArr(attrs)
+	gc, tmp := wrapAttributeArr(attrs)
 	defer gc()
 
 	rv := C.rsc_GetAttributeValue(c.ctx, C.CK_SESSION_HANDLE(sess), C.CK_OBJECT_HANDLE(obj), &tmp[0], C.CK_ULONG(len(attrs)))

@@ -5,8 +5,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MAX_CRYPTO_OBJ_SIZE 4096
-
 #define INVOKE(args, ret) http_invoke(client, __func__, args, ret, false)
 #define INVOKE_SAFE(args, ret) http_invoke(client, __func__, args, ret, true)
 
@@ -272,7 +270,7 @@ CK_RV C_OpenSession(CK_SLOT_ID slotID, CK_FLAGS flags, CK_VOID_PTR pApplication,
         goto out;
     }
 
-    if (!cJSON_IsNumber(ret)) {
+    if (cJSON_IsNumber(ret)) {
         *phSession = ret->valuedouble;
     } else {
         rv = CKR_FUNCTION_FAILED;
@@ -420,50 +418,22 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject, 
         return CKR_ARGUMENTS_BAD;
     }
 
-    args = cJSON_CreateArray();
-    cJSON_AddItemToArray(args, cJSON_CreateNumber(hSession));
-    cJSON_AddItemToArray(args, cJSON_CreateNumber(hObject));
-
-    cJSON *objs = cJSON_CreateArray();
-    cJSON_AddItemToArray(args, objs);
-    for (CK_ULONG i = 0; i < ulCount; i++) {
-        cJSON *tmp = cJSON_CreateObject();
-        cJSON_AddItemToArray(objs, tmp);
-
-        cJSON_AddNumberToObject(tmp, "type", pTemplate[i].type);
-        if (pTemplate[i].pValue == NULL) {
-            cJSON_AddNumberToObject(tmp, "valueLen", 0);
-        } else {
-            cJSON_AddNumberToObject(tmp, "valueLen", pTemplate[i].ulValueLen);
-        }
-    }
-
-    rv = INVOKE(args, &ret);
-
-    if (!cJSON_IsArray(ret)) {
+    cJSON *attrs = wrapAttributeArr(pTemplate, ulCount, true);
+    if (attrs == NULL) {
         rv = CKR_FUNCTION_FAILED;
         goto out;
     }
 
-    cJSON *tmp;
-    CK_ULONG i = 0;
-    cJSON_ArrayForEach(tmp, ret)
-    {
-        CK_ULONG new_len, dummy;
-        FILL_INT_BY_JSON(tmp, "type", pTemplate[i].type);
-        FILL_INT_BY_JSON(tmp, "valueLen", new_len);
+    args = cJSON_CreateArray();
+    cJSON_AddItemToArray(args, cJSON_CreateNumber(hSession));
+    cJSON_AddItemToArray(args, cJSON_CreateNumber(hObject));
+    cJSON_AddItemToArray(args, attrs);
 
-        cJSON *val = cJSON_GetObjectItem(tmp, "value");
-        if (cJSON_IsString(val)) {
-            mbedtls_base64_decode(
-                pTemplate[i].pValue,
-                pTemplate[i].ulValueLen,
-                &dummy,
-                (unsigned char *)val->string,
-                strlen(val->string));
-        }
-        pTemplate[i].ulValueLen = new_len;
-        i++;
+    rv = INVOKE(args, &ret);
+
+    if (!unwrapAttributeArr(ret, pTemplate, ulCount)) {
+        rv = CKR_FUNCTION_FAILED;
+        goto out;
     }
 out:
     cJSON_Delete(args);
@@ -485,32 +455,20 @@ CK_RV C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, 
 {
     cJSON *args = NULL;
     CK_RV rv;
-    char buf[MAX_CRYPTO_OBJ_SIZE];
-    size_t str_len;
 
     if (ulCount != 0 && pTemplate == NULL) {
         return CKR_ARGUMENTS_BAD;
     }
 
+    cJSON *attrs = wrapAttributeArr(pTemplate, ulCount, false);
+    if (attrs == NULL) {
+        rv = CKR_FUNCTION_FAILED;
+        goto out;
+    }
+
     args = cJSON_CreateArray();
     cJSON_AddItemToArray(args, cJSON_CreateNumber(hSession));
-
-    cJSON *objs = cJSON_CreateArray();
-    cJSON_AddItemToArray(args, objs);
-    for (CK_ULONG i = 0; i < ulCount; i++) {
-        if (mbedtls_base64_encode((unsigned char *)buf, sizeof(buf), &str_len, pTemplate[i].pValue, pTemplate[i].ulValueLen) != 0) {
-            DBG("buffer too small");
-            rv = CKR_FUNCTION_FAILED;
-            goto out;
-        }
-        buf[str_len] = '\0';
-        cJSON *tmp = cJSON_CreateObject();
-        cJSON_AddItemToArray(objs, tmp);
-
-        cJSON_AddNumberToObject(tmp, "type", pTemplate[i].type);
-        cJSON_AddStringToObject(tmp, "value", buf);
-        cJSON_AddNumberToObject(tmp, "valueLen", pTemplate[i].ulValueLen);
-    }
+    cJSON_AddItemToArray(args, attrs);
 
     rv = INVOKE(args, NULL);
 out:
@@ -535,13 +493,15 @@ CK_RV C_FindObjects(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE_PTR phObject, C
         goto out;
     }
 
+    *pulObjectCount = 0;
     cJSON *id;
     cJSON_ArrayForEach(id, ret)
     {
         if (cJSON_IsNumber(id)) {
-            phObject[*pulObjectCount++] = id->valuedouble;
+            phObject[(*pulObjectCount)++] = id->valuedouble;
         }
     }
+    DBG("Returning %lu objects", *pulObjectCount);
 out:
     cJSON_Delete(args);
     cJSON_Delete(ret);
@@ -750,8 +710,8 @@ CK_RV C_Sign(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG ulDataLen, 
             pSignature,
             *pulSignatureLen,
             &dummy,
-            (unsigned char *)sign->string,
-            strlen(sign->string));
+            (unsigned char *)sign->valuestring,
+            strlen(sign->valuestring));
     }
     *pulSignatureLen = new_len;
 out:
@@ -803,8 +763,8 @@ CK_RV C_SignFinal(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pSignature, CK_ULONG_P
             pSignature,
             *pulSignatureLen,
             &dummy,
-            (unsigned char *)sign->string,
-            strlen(sign->string));
+            (unsigned char *)sign->valuestring,
+            strlen(sign->valuestring));
     }
     *pulSignatureLen = new_len;
 

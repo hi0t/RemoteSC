@@ -17,8 +17,9 @@ const (
 	CKR_CRYPTOKI_NOT_INITIALIZED     = C.CKR_CRYPTOKI_NOT_INITIALIZED
 	CKR_CRYPTOKI_ALREADY_INITIALIZED = C.CKR_CRYPTOKI_ALREADY_INITIALIZED
 
-	hostUlongLen = uint(C.sizeof_CK_ULONG)
-	netUlongLen  = uint(4)
+	hostUlongLen              = uint(C.sizeof_CK_ULONG)
+	netUlongLen               = uint(4)
+	netUnavailableInformation = uint(0xffffffff)
 )
 
 type pkcs11_err uint
@@ -75,12 +76,12 @@ type ckTokenInfo struct {
 type ckAttribute struct {
 	Type     uint   `json:"type"`
 	Value    []byte `json:"value,omitempty"`
-	ValueLen uint   `json:"valueLen"`
+	ValueLen uint   `json:"valueLen,omitempty"`
 }
 
 type ckMechanism struct {
 	Mechanism uint   `json:"mechanism"`
-	Parameter []byte `json:"parameter"`
+	Parameter []byte `json:"parameter,omitempty"`
 }
 
 type ckSignData struct {
@@ -130,84 +131,66 @@ func wrapBool(x bool) C.CK_BBOOL {
 	return C.CK_FALSE
 }
 
-func allocAttributeArr(nattr []ckAttribute) (func(), []C.CK_ATTRIBUTE) {
-	hattr := make([]C.CK_ATTRIBUTE, len(nattr))
-	for i, a := range nattr {
-		hattr[i]._type = C.CK_ATTRIBUTE_TYPE(a.Type)
-		len := a.ValueLen
+func wrapAttributeArr(netAttr []ckAttribute) (func(), []C.CK_ATTRIBUTE) {
+	hostAttr := make([]C.CK_ATTRIBUTE, len(netAttr))
+	for i, a := range netAttr {
+		hostAttr[i]._type = C.CK_ATTRIBUTE_TYPE(a.Type)
+		outLen := a.ValueLen
 
-		if len == 0 {
+		// request length
+		if outLen == 0 {
 			continue
 		}
 
-		switch hattr[i]._type {
-		case C.CKA_CLASS:
-		case C.CKA_CERTIFICATE_TYPE:
-		case C.CKA_KEY_TYPE:
-		case C.CKA_MODULUS_BITS:
-			len = max(len, hostUlongLen)
+		switch hostAttr[i]._type {
+		case C.CKA_CLASS, C.CKA_CERTIFICATE_TYPE, C.CKA_KEY_TYPE, C.CKA_MODULUS_BITS:
+			outLen = max(outLen, hostUlongLen)
 		}
 
-		C.rsc_set_attribute_value(&hattr[i], C.CK_VOID_PTR(C.malloc(C.size_t(len))))
-		hattr[i].ulValueLen = C.CK_ULONG(len)
+		if a.Value == nil {
+			// attribute get request
+			C.rsc_set_attribute_value(&hostAttr[i], C.CK_VOID_PTR(C.malloc(C.size_t(outLen))))
+		} else {
+			hostVal := a.Value
+			if outLen > uint(len(hostVal)) {
+				hostVal = make([]byte, outLen)
+				copy(hostVal, a.Value)
+			}
+			C.rsc_set_attribute_value(&hostAttr[i], C.CK_VOID_PTR(C.CBytes(hostVal)))
+		}
+		hostAttr[i].ulValueLen = C.CK_ULONG(outLen)
 	}
 	return func() {
-			for _, a := range hattr {
-				C.free(unsafe.Pointer(C.rsc_get_attribute_value(&a)))
-			}
-		},
-		hattr
+		for _, a := range hostAttr {
+			C.free(unsafe.Pointer(C.rsc_get_attribute_value(&a)))
+		}
+	}, hostAttr
 }
 
-func wrapAttributeArr(nattr []ckAttribute) (func(), []C.CK_ATTRIBUTE) {
-	hattr := make([]C.CK_ATTRIBUTE, len(nattr))
-	for i, a := range nattr {
-		hattr[i]._type = C.CK_ATTRIBUTE_TYPE(a.Type)
-		len := a.ValueLen
+func unWrapAttributeArr(hostAttr []C.CK_ATTRIBUTE) []ckAttribute {
+	netAttr := make([]ckAttribute, len(hostAttr))
+	for i, a := range hostAttr {
+		netAttr[i].Type = uint(a._type)
+		outLen := uint(a.ulValueLen)
 
-		if len == 0 {
+		if outLen == 0 {
 			continue
 		}
 
-		switch hattr[i]._type {
-		case C.CKA_CLASS:
-		case C.CKA_CERTIFICATE_TYPE:
-		case C.CKA_KEY_TYPE:
-		case C.CKA_MODULUS_BITS:
-			len = max(len, hostUlongLen)
-		}
-
-		C.rsc_set_attribute_value(&hattr[i], C.CK_VOID_PTR(C.CBytes(a.Value[:len])))
-		hattr[i].ulValueLen = C.CK_ULONG(len)
-	}
-	return func() {
-			for _, a := range hattr {
-				C.free(unsafe.Pointer(C.rsc_get_attribute_value(&a)))
-			}
-		},
-		hattr
-}
-
-func unWrapAttributeArr(hattr []C.CK_ATTRIBUTE) []ckAttribute {
-	nattr := make([]ckAttribute, len(hattr))
-	for i, a := range hattr {
-		nattr[i].Type = uint(a._type)
-		len := uint(a.ulValueLen)
-
-		if len == 0 {
+		if outLen == C.CK_UNAVAILABLE_INFORMATION {
+			netAttr[i].ValueLen = netUnavailableInformation
 			continue
 		}
 
 		switch a._type {
-		case C.CKA_CLASS:
-		case C.CKA_CERTIFICATE_TYPE:
-		case C.CKA_KEY_TYPE:
-		case C.CKA_MODULUS_BITS:
-			len = min(len, netUlongLen)
+		case C.CKA_CLASS, C.CKA_CERTIFICATE_TYPE, C.CKA_KEY_TYPE, C.CKA_MODULUS_BITS:
+			outLen = min(uint(a.ulValueLen), netUlongLen)
 		}
-
-		nattr[i].Value = C.GoBytes(unsafe.Pointer(C.rsc_get_attribute_value(&a)), C.int(len))
-		nattr[i].ValueLen = len
+		val := C.rsc_get_attribute_value(&a)
+		if val != nil {
+			netAttr[i].Value = C.GoBytes(unsafe.Pointer(val), C.int(outLen))
+		}
+		netAttr[i].ValueLen = outLen
 	}
-	return nattr
+	return netAttr
 }

@@ -1,5 +1,6 @@
 #include "utils.h"
 
+#include <mbedtls/base64.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,6 +8,13 @@
 
 #define DEFAULT_CFG_PATH "~/.config/remotesc.json"
 #define DEFAULT_ADDR "127.0.0.1:44555"
+
+#define MIN(a, b) (((a) < (b)) ? (a) : (b))
+#define MAX(a, b) (((a) > (b)) ? (a) : (b))
+
+#define HOST_ULONG_LEN sizeof(CK_ULONG)
+#define NET_ULONG_LEN 4
+#define NET_UNAVAILABLE_INFORMATION 0xffffffff
 
 bool __rsc_dbg = false;
 
@@ -53,15 +61,15 @@ struct rsc_config *parse_config()
         cJSON *obj;
         obj = cJSON_GetObjectItem(root, "addr");
         if (addr == NULL && cJSON_IsString(obj)) {
-            addr = obj->string;
+            addr = obj->valuestring;
         }
         obj = cJSON_GetObjectItem(root, "fingerprint");
         if (fingerprint == NULL && cJSON_IsString(obj)) {
-            fingerprint = obj->string;
+            fingerprint = obj->valuestring;
         }
         obj = cJSON_GetObjectItem(root, "secret");
         if (secret == NULL && cJSON_IsString(obj)) {
-            secret = obj->string;
+            secret = obj->valuestring;
         }
     }
 
@@ -95,6 +103,100 @@ void free_config(struct rsc_config *cfg)
     free(cfg->fingerprint);
     free(cfg->secret);
     free(cfg);
+}
+
+cJSON *wrapAttributeArr(CK_ATTRIBUTE_PTR attrs, CK_ULONG count, bool getter)
+{
+    char buf[MAX_CRYPTO_OBJ_SIZE];
+    cJSON *objs = cJSON_CreateArray();
+    size_t str_len;
+
+    for (CK_ULONG i = 0; i < count; i++) {
+        cJSON *tmp = cJSON_CreateObject();
+        cJSON_AddItemToArray(objs, tmp);
+
+        cJSON_AddNumberToObject(tmp, "type", attrs[i].type);
+        // request length
+        if (attrs[i].pValue == NULL) {
+            continue;
+        }
+
+        CK_ULONG len = attrs[i].ulValueLen;
+        switch (attrs[i].type) {
+        case CKA_CLASS:
+        case CKA_CERTIFICATE_TYPE:
+        case CKA_KEY_TYPE:
+        case CKA_MODULUS_BITS:
+            len = MIN(len, NET_ULONG_LEN);
+        }
+
+        if (!getter) {
+            if (mbedtls_base64_encode((unsigned char *)buf, sizeof(buf), &str_len, attrs[i].pValue, len) != 0) {
+                DBG("buffer too small");
+                cJSON_Delete(objs);
+                return NULL;
+            }
+            buf[str_len] = '\0';
+            cJSON_AddStringToObject(tmp, "value", buf);
+        }
+        cJSON_AddNumberToObject(tmp, "valueLen", len);
+    }
+    return objs;
+}
+
+bool unwrapAttributeArr(cJSON *objs, CK_ATTRIBUTE_PTR attrs, CK_ULONG count)
+{
+    unsigned char buf[MAX_CRYPTO_OBJ_SIZE];
+    int sz = cJSON_GetArraySize(objs);
+    CK_ULONG len, dummy;
+
+    for (int i = 0; i < sz; i++) {
+        if (i >= (int)count) {
+            return false;
+        }
+        cJSON *tmp = cJSON_GetArrayItem(objs, i);
+
+        FILL_INT_BY_JSON(tmp, "type", attrs[i].type);
+        FILL_INT_BY_JSON(tmp, "valueLen", len);
+
+        if (len == 0) {
+            continue;
+        }
+
+        if (len == NET_UNAVAILABLE_INFORMATION) {
+            attrs[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+            continue;
+        }
+
+        switch (attrs[i].type) {
+        case CKA_CLASS:
+        case CKA_CERTIFICATE_TYPE:
+        case CKA_KEY_TYPE:
+        case CKA_MODULUS_BITS:
+            len = MAX(len, HOST_ULONG_LEN);
+        }
+
+        cJSON *val = cJSON_GetObjectItem(tmp, "value");
+        if (!cJSON_IsString(val)) {
+            // return length
+            attrs[i].ulValueLen = len;
+            continue;
+        }
+
+        if (len > attrs[i].ulValueLen) {
+            return false;
+        }
+
+        memset(buf, 0, len);
+        if (mbedtls_base64_decode(buf, sizeof(buf), &dummy, (unsigned char *)val->valuestring, strlen(val->valuestring)) != 0) {
+            DBG("buffer too small");
+            return false;
+        }
+        memcpy(attrs[i].pValue, buf, len);
+
+        attrs[i].ulValueLen = len;
+    }
+    return true;
 }
 
 static cJSON *read_file(const char *fname)
