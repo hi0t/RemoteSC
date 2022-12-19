@@ -14,7 +14,7 @@
 
 #define HOST_ULONG_LEN sizeof(CK_ULONG)
 #define NET_ULONG_LEN 4
-#define NET_UNAVAILABLE_INFORMATION 0xffffffff
+#define NET_UNAVAIL 0xffffffff
 
 bool __rsc_dbg = false;
 
@@ -105,6 +105,14 @@ void free_config(struct rsc_config *cfg)
     free(cfg);
 }
 
+CK_ULONG ntohUnavail(CK_ULONG v)
+{
+    if (v == NET_UNAVAIL) {
+        return CK_UNAVAILABLE_INFORMATION;
+    }
+    return v;
+}
+
 cJSON *wrapAttributeArr(CK_ATTRIBUTE_PTR attrs, CK_ULONG count, bool getter)
 {
     char buf[MAX_CRYPTO_OBJ_SIZE];
@@ -163,7 +171,7 @@ bool unwrapAttributeArr(cJSON *objs, CK_ATTRIBUTE_PTR attrs, CK_ULONG count)
             continue;
         }
 
-        if (len == NET_UNAVAILABLE_INFORMATION) {
+        if (len == NET_UNAVAIL) {
             attrs[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
             continue;
         }

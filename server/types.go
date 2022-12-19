@@ -7,6 +7,7 @@ package server
 import "C"
 import (
 	"fmt"
+	"strings"
 	"unsafe"
 )
 
@@ -17,9 +18,9 @@ const (
 	CKR_CRYPTOKI_NOT_INITIALIZED     = C.CKR_CRYPTOKI_NOT_INITIALIZED
 	CKR_CRYPTOKI_ALREADY_INITIALIZED = C.CKR_CRYPTOKI_ALREADY_INITIALIZED
 
-	hostUlongLen              = uint(C.sizeof_CK_ULONG)
-	netUlongLen               = uint(4)
-	netUnavailableInformation = uint(0xffffffff)
+	hostUlongLen = uint(C.sizeof_CK_ULONG)
+	netUlongLen  = uint(4)
+	netUnavail   = uint(0xffffffff)
 )
 
 type pkcs11_err uint
@@ -124,6 +125,17 @@ func unwrapVersion(version C.CK_VERSION) ckVersion {
 	return ckVersion{byte(version.major), byte(version.minor)}
 }
 
+func unwrapString(s C.CK_UTF8CHAR_PTR, len int) string {
+	return strings.TrimRight(C.GoStringN((*C.char)(unsafe.Pointer(s)), C.int(len)), " ")
+}
+
+func htonUnavail(v C.CK_ULONG) uint {
+	if v == C.CK_UNAVAILABLE_INFORMATION {
+		return netUnavail
+	}
+	return uint(v)
+}
+
 func wrapBool(x bool) C.CK_BBOOL {
 	if x {
 		return C.CK_TRUE
@@ -178,7 +190,7 @@ func unWrapAttributeArr(hostAttr []C.CK_ATTRIBUTE) []ckAttribute {
 		}
 
 		if outLen == C.CK_UNAVAILABLE_INFORMATION {
-			netAttr[i].ValueLen = netUnavailableInformation
+			netAttr[i].ValueLen = netUnavail
 			continue
 		}
 

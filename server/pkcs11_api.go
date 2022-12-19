@@ -9,7 +9,6 @@ package server
 import "C"
 import (
 	"fmt"
-	"strings"
 	"unsafe"
 )
 
@@ -46,9 +45,9 @@ func (c *pkcs11_ctx) GetInfo() (ckInfo, error) {
 	rv := C.rsc_GetInfo(c.ctx, &info)
 	return ckInfo{
 		CryptokiVersion:    unwrapVersion(info.cryptokiVersion),
-		ManufacturerID:     strings.TrimRight(C.GoStringN((*C.char)(unsafe.Pointer(&info.manufacturerID[0])), 32), " "),
+		ManufacturerID:     unwrapString(&info.manufacturerID[0], 32),
 		Flags:              uint(C.rsc_get_info_flags(&info)),
-		LibraryDescription: strings.TrimRight(C.GoStringN((*C.char)(unsafe.Pointer(&info.libraryDescription[0])), 32), " "),
+		LibraryDescription: unwrapString(&info.libraryDescription[0], 32),
 		LibraryVersion:     unwrapVersion(info.libraryVersion),
 	}, unwrapError(rv)
 }
@@ -79,8 +78,8 @@ func (c *pkcs11_ctx) GetSlotInfo(slotID uint) (ckSlotInfo, error) {
 	var info C.CK_SLOT_INFO
 	rv := C.rsc_GetSlotInfo(c.ctx, C.CK_ULONG(slotID), &info)
 	return ckSlotInfo{
-		SlotDescription: strings.TrimRight(C.GoStringN((*C.char)(unsafe.Pointer(&info.slotDescription[0])), 64), " "),
-		ManufacturerID:  strings.TrimRight(C.GoStringN((*C.char)(unsafe.Pointer(&info.manufacturerID[0])), 32), " "),
+		SlotDescription: unwrapString(&info.slotDescription[0], 64),
+		ManufacturerID:  unwrapString(&info.manufacturerID[0], 32),
 		Flags:           uint(info.flags),
 		HardwareVersion: unwrapVersion(info.hardwareVersion),
 		FirmwareVersion: unwrapVersion(info.firmwareVersion),
@@ -91,24 +90,24 @@ func (c *pkcs11_ctx) GetTokenInfo(slotID uint) (ckTokenInfo, error) {
 	var info C.CK_TOKEN_INFO
 	rv := C.rsc_GetTokenInfo(c.ctx, C.CK_ULONG(slotID), &info)
 	return ckTokenInfo{
-		Label:              strings.TrimRight(C.GoStringN((*C.char)(unsafe.Pointer(&info.label[0])), 32), " "),
-		ManufacturerID:     strings.TrimRight(C.GoStringN((*C.char)(unsafe.Pointer(&info.manufacturerID[0])), 32), " "),
-		Model:              strings.TrimRight(C.GoStringN((*C.char)(unsafe.Pointer(&info.model[0])), 16), " "),
-		SerialNumber:       strings.TrimRight(C.GoStringN((*C.char)(unsafe.Pointer(&info.serialNumber[0])), 16), " "),
+		Label:              unwrapString(&info.label[0], 32),
+		ManufacturerID:     unwrapString(&info.manufacturerID[0], 32),
+		Model:              unwrapString(&info.model[0], 16),
+		SerialNumber:       unwrapString(&info.serialNumber[0], 16),
 		Flags:              uint(info.flags),
-		MaxSessionCount:    uint(info.ulMaxSessionCount),
-		SessionCount:       uint(info.ulSessionCount),
-		MaxRwSessionCount:  uint(info.ulMaxRwSessionCount),
-		RwSessionCount:     uint(info.ulRwSessionCount),
+		MaxSessionCount:    htonUnavail(info.ulMaxSessionCount),
+		SessionCount:       htonUnavail(info.ulSessionCount),
+		MaxRwSessionCount:  htonUnavail(info.ulMaxRwSessionCount),
+		RwSessionCount:     htonUnavail(info.ulRwSessionCount),
 		MaxPinLen:          uint(info.ulMaxPinLen),
 		MinPinLen:          uint(info.ulMinPinLen),
-		TotalPublicMemory:  uint(info.ulTotalPublicMemory),
-		FreePublicMemory:   uint(info.ulFreePublicMemory),
-		TotalPrivateMemory: uint(info.ulTotalPrivateMemory),
-		FreePrivateMemory:  uint(info.ulFreePrivateMemory),
+		TotalPublicMemory:  htonUnavail(info.ulTotalPublicMemory),
+		FreePublicMemory:   htonUnavail(info.ulFreePublicMemory),
+		TotalPrivateMemory: htonUnavail(info.ulTotalPrivateMemory),
+		FreePrivateMemory:  htonUnavail(info.ulFreePrivateMemory),
 		HardwareVersion:    unwrapVersion(info.hardwareVersion),
 		FirmwareVersion:    unwrapVersion(info.firmwareVersion),
-		UTCTime:            strings.TrimRight(C.GoStringN((*C.char)(unsafe.Pointer(&info.utcTime[0])), 16), " "),
+		UTCTime:            unwrapString(&info.utcTime[0], 16),
 	}, unwrapError(rv)
 }
 

@@ -23,6 +23,11 @@
         cJSON *obj = cJSON_GetObjectItem(json, key);                   \
         val = cJSON_IsNumber(obj) ? (typeof(val))obj->valuedouble : 0; \
     } while (0)
+#define FILL_INT_BY_JSON_UNAVAIL(json, key, val) \
+    do {                                         \
+        FILL_INT_BY_JSON(json, key, val);        \
+        val = ntohUnavail(val);                  \
+    } while (0)
 #define FILL_VERSION_BY_JSON(json, key, ver)              \
     do {                                                  \
         cJSON *verObj = cJSON_GetObjectItem(json, key);   \
@@ -46,5 +51,6 @@ void debug(const char *func, int line, const char *fmt, ...);
 void padded_copy(unsigned char *dst, const char *src, size_t dst_size);
 struct rsc_config *parse_config();
 void free_config(struct rsc_config *cfg);
+CK_ULONG ntohUnavail(CK_ULONG v);
 cJSON *wrapAttributeArr(CK_ATTRIBUTE_PTR attrs, CK_ULONG count, bool getter);
 bool unwrapAttributeArr(cJSON *objs, CK_ATTRIBUTE_PTR attrs, CK_ULONG count);
