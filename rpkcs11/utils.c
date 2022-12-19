@@ -1,5 +1,6 @@
 #include "utils.h"
 
+#include <arpa/inet.h>
 #include <mbedtls/base64.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -7,7 +8,8 @@
 #include <string.h>
 
 #define DEFAULT_CFG_PATH "~/.config/remotesc.json"
-#define DEFAULT_ADDR "127.0.0.1:44555"
+#define DEFAULT_PORT "44555"
+#define DEFAULT_GATE "<default>"
 
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
 #define MAX(a, b) (((a) > (b)) ? (a) : (b))
@@ -19,6 +21,7 @@
 bool __rsc_dbg = false;
 
 static cJSON *read_file(const char *fname);
+static char *format_addr(const char *addr);
 
 void debug(const char *func, int line, const char *fmt, ...)
 {
@@ -74,7 +77,7 @@ struct rsc_config *parse_config()
     }
 
     if (addr == NULL) {
-        addr = DEFAULT_ADDR;
+        addr = DEFAULT_GATE;
     }
     if (fingerprint == NULL) {
         DBG("fingerprint not configured");
@@ -85,8 +88,14 @@ struct rsc_config *parse_config()
         goto out;
     }
 
+    char *formatted_addr = format_addr(addr);
+    if (formatted_addr == NULL) {
+        DBG("invalid address %s", addr);
+        goto out;
+    }
+
     cfg = malloc(sizeof(*cfg));
-    cfg->addr = strdup(addr);
+    cfg->addr = formatted_addr;
     cfg->fingerprint = strdup(fingerprint);
     cfg->secret = strdup(secret);
 out:
@@ -225,4 +234,64 @@ static cJSON *read_file(const char *fname)
     cJSON *json = cJSON_ParseWithLength(content, n);
     free(content);
     return json;
+}
+
+static const char *default_gateway()
+{
+    unsigned long destination, gateway;
+    char line[1024];
+    static char addr[INET_ADDRSTRLEN];
+    FILE *f;
+
+    f = fopen("/proc/net/route", "r");
+    if (!f) {
+        DBG("can not open /proc/net/route");
+        return NULL;
+    }
+
+    while (fgets(line, sizeof(line), f)) {
+        if (sscanf(line, "%*s %lx %lx", &destination, &gateway) == 2) {
+            if (destination == 0) {
+                inet_ntop(AF_INET, &gateway, addr, sizeof(addr));
+                fclose(f);
+                return addr;
+            }
+        }
+    }
+
+    fclose(f);
+    DBG("can not find default route");
+    return NULL;
+}
+
+static char *format_addr(const char *addr)
+{
+    char buf[256];
+
+    char *sep = strrchr(addr, ':');
+    if (sep != NULL) {
+        char *v6 = strrchr(addr, ']');
+        if (sep < v6) {
+            sep = NULL;
+        }
+    }
+    if (strncmp(addr, DEFAULT_GATE, strlen(DEFAULT_GATE)) == 0) {
+        addr = default_gateway();
+        if (addr == NULL) {
+            return NULL;
+        }
+        if (sep != NULL) {
+            if (snprintf(buf, sizeof(buf), "%s%s", addr, sep) < 0) {
+                return NULL;
+            }
+            return strdup(buf);
+        }
+    }
+    if (sep == NULL) {
+        if (snprintf(buf, sizeof(buf), "%s:%s", addr, DEFAULT_PORT) < 0) {
+            return NULL;
+        }
+        return strdup(buf);
+    }
+    return strdup(addr);
 }
