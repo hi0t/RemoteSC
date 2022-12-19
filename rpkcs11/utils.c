@@ -2,12 +2,13 @@
 
 #include <arpa/inet.h>
 #include <mbedtls/base64.h>
+#include <pwd.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
-#define DEFAULT_CFG_PATH "~/.config/remotesc.json"
 #define DEFAULT_PORT "44555"
 #define DEFAULT_GATE "<default>"
 
@@ -51,10 +52,6 @@ struct rsc_config *parse_config()
 {
     struct rsc_config *cfg = NULL;
     const char *cfg_path = getenv("REMOTESC_CONFIG");
-    if (cfg_path == NULL) {
-        cfg_path = DEFAULT_CFG_PATH;
-    }
-
     const char *addr = getenv("REMOTESC_ADDR");
     const char *fingerprint = getenv("REMOTESC_FINGERPRINT");
     const char *secret = getenv("REMOTESC_SECRET");
@@ -75,7 +72,6 @@ struct rsc_config *parse_config()
             secret = obj->valuestring;
         }
     }
-
     if (addr == NULL) {
         addr = DEFAULT_GATE;
     }
@@ -216,22 +212,39 @@ bool unwrapAttributeArr(cJSON *objs, CK_ATTRIBUTE_PTR attrs, CK_ULONG count)
     return true;
 }
 
+static const char *default_config_location()
+{
+    static char path[PATH_MAX];
+    struct passwd *pw = getpwuid(getuid());
+    if (pw == NULL) {
+        return path;
+    }
+    snprintf(path, sizeof(path), "%s/.config/remotesc.json", pw->pw_dir);
+    return path;
+}
+
 static cJSON *read_file(const char *fname)
 {
-    FILE *file = fopen(fname, "rb");
-    if (file == NULL) {
+    if (fname == NULL) {
+        fname = default_config_location();
+    }
+    FILE *f = fopen(fname, "rb");
+    if (f == NULL) {
         return NULL;
     }
 
-    fseek(file, 0, SEEK_END);
-    size_t length = ftell(file);
-    fseek(file, 0, SEEK_SET);
+    fseek(f, 0, SEEK_END);
+    size_t length = ftell(f);
+    fseek(f, 0, SEEK_SET);
 
     char *content = malloc(length);
-    size_t n = fread(content, sizeof(char), length, file);
-    fclose(file);
+    size_t n = fread(content, sizeof(char), length, f);
+    fclose(f);
 
     cJSON *json = cJSON_ParseWithLength(content, n);
+    if (json == NULL) {
+        DBG("invalid json format: %s", fname);
+    }
     free(content);
     return json;
 }
