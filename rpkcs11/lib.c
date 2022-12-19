@@ -650,8 +650,6 @@ CK_RV C_DigestFinal(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pDigest, CK_ULONG_PT
 CK_RV C_SignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJECT_HANDLE hKey)
 {
     cJSON *args = NULL;
-    char buf[MAX_CRYPTO_OBJ_SIZE];
-    size_t str_len;
     CK_RV rv;
 
     if (pMechanism == NULL) {
@@ -665,17 +663,10 @@ CK_RV C_SignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJ
     cJSON_AddItemToArray(args, cJSON_CreateNumber(hKey));
 
     cJSON_AddNumberToObject(mech, "mechanism", pMechanism->mechanism);
-    if (mbedtls_base64_encode((unsigned char *)buf, sizeof(buf), &str_len, pMechanism->pParameter, pMechanism->ulParameterLen) != 0) {
-        DBG("buffer too small");
-        rv = CKR_FUNCTION_FAILED;
-        goto out;
-    } else {
-        buf[str_len] = '\0';
-        cJSON_AddStringToObject(mech, "parameter", buf);
-    }
+    // TODO handle special mechanism parameters
 
     rv = INVOKE(args, NULL);
-out:
+
     cJSON_Delete(args);
     return rv;
 }

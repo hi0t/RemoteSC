@@ -182,20 +182,9 @@ CK_RV rsc_FindObjectsFinal(rsc_ctx *ctx, CK_SESSION_HANDLE hSession)
     return ctx->f->C_FindObjectsFinal(hSession);
 }
 
-CK_RV rsc_SignInit(rsc_ctx *ctx, CK_SESSION_HANDLE hSession, rsc_unpacked_mechanism *uMechanism, CK_OBJECT_HANDLE hKey)
+CK_RV rsc_SignInit(rsc_ctx *ctx, CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJECT_HANDLE hKey)
 {
-    CK_MECHANISM pMechanism = {
-        .mechanism = uMechanism->mechanism,
-        .pParameter = uMechanism->pParameter,
-        .ulParameterLen = uMechanism->ulParameterLen
-    };
-
-    CK_RV rv = ctx->f->C_SignInit(hSession, &pMechanism, hKey);
-
-    uMechanism->mechanism = pMechanism.mechanism;
-    uMechanism->pParameter = pMechanism.pParameter;
-    uMechanism->ulParameterLen = pMechanism.ulParameterLen;
-    return rv;
+    return ctx->f->C_SignInit(hSession, pMechanism, hKey);
 }
 
 CK_RV rsc_Sign(rsc_ctx *ctx, CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG ulDataLen, CK_BYTE_PTR pSignature, CK_ULONG_PTR pulSignatureLen)

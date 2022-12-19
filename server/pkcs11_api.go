@@ -171,13 +171,9 @@ func (c *pkcs11_ctx) FindObjectsFinal(sess ckSessionHandle) error {
 }
 
 func (c *pkcs11_ctx) SignInit(sess ckSessionHandle, mech ckMechanism, key ckObjectHandle) error {
-	cmech := &C.rsc_unpacked_mechanism{
-		mechanism:      C.CK_MECHANISM_TYPE(mech.Mechanism),
-		pParameter:     C.CK_VOID_PTR(C.CBytes(mech.Parameter)),
-		ulParameterLen: C.CK_ULONG(len(mech.Parameter)),
-	}
-	defer C.free(unsafe.Pointer(cmech.pParameter))
-	return unwrapError(C.rsc_SignInit(c.ctx, C.CK_SESSION_HANDLE(sess), cmech, C.CK_OBJECT_HANDLE(key)))
+	cmech := C.CK_MECHANISM{mechanism: C.CK_MECHANISM_TYPE(mech.Mechanism)}
+	// TODO handle special mechanism parameters
+	return unwrapError(C.rsc_SignInit(c.ctx, C.CK_SESSION_HANDLE(sess), &cmech, C.CK_OBJECT_HANDLE(key)))
 }
 
 func (c *pkcs11_ctx) Sign(sess ckSessionHandle, msg []byte, signLen uint) (ckSignData, error) {

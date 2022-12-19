@@ -4,12 +4,6 @@
 
 typedef struct rsc_ctx rsc_ctx;
 
-typedef struct rsc_unpacked_mechanism {
-    CK_MECHANISM_TYPE mechanism;
-    CK_VOID_PTR pParameter;
-    CK_ULONG ulParameterLen;
-} rsc_unpacked_mechanism;
-
 rsc_ctx *rsc_open(const char *module, char **err);
 void rsc_close(rsc_ctx *ctx);
 
@@ -28,7 +22,7 @@ CK_RV rsc_GetAttributeValue(rsc_ctx *ctx, CK_SESSION_HANDLE hSession, CK_OBJECT_
 CK_RV rsc_FindObjectsInit(rsc_ctx *ctx, CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, CK_ULONG ulCount);
 CK_RV rsc_FindObjects(rsc_ctx *ctx, CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE_PTR phObject, CK_ULONG ulMaxObjectCount, CK_ULONG_PTR pulObjectCount);
 CK_RV rsc_FindObjectsFinal(rsc_ctx *ctx, CK_SESSION_HANDLE hSession);
-CK_RV rsc_SignInit(rsc_ctx *ctx, CK_SESSION_HANDLE hSession, rsc_unpacked_mechanism *uMechanism, CK_OBJECT_HANDLE hKey);
+CK_RV rsc_SignInit(rsc_ctx *ctx, CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJECT_HANDLE hKey);
 CK_RV rsc_Sign(rsc_ctx *ctx, CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG ulDataLen, CK_BYTE_PTR pSignature, CK_ULONG_PTR pulSignatureLen);
 CK_RV rsc_SignUpdate(rsc_ctx *ctx, CK_SESSION_HANDLE hSession, CK_BYTE_PTR pPart, CK_ULONG ulPartLen);
 CK_RV rsc_SignFinal(rsc_ctx *ctx, CK_SESSION_HANDLE hSession, CK_BYTE_PTR pSignature, CK_ULONG_PTR pulSignatureLen);
