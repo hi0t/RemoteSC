@@ -6,12 +6,13 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"strings"
 )
+
+const DefaultPort = "25519"
 
 var (
 	listeners    []*http.Server
@@ -36,9 +37,9 @@ func Start(cfg Config) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", processReq)
 
-	addrs := extractAddr(cfg.Address)
+	addrs := formatAddr(cfg.Address)
 	sharedSecret = cfg.Secret
-	cert := extractCertificate(cfg.Cert, cfg.Priv)
+	cert := decodeCertificate(cfg.Cert, cfg.Priv)
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{cert},
 	}
@@ -99,13 +100,17 @@ func processReq(w http.ResponseWriter, r *http.Request) {
 	w.Write(json)
 }
 
-func extractAddr(listen string) []string {
-	host, port, err := net.SplitHostPort(listen)
-	if err != nil {
-		log.Fatalf("Failed to parse listen address: %v", err)
+func formatAddr(listen string) []string {
+	host, port := splitHostPort(listen)
+	if host == "" {
+		log.Fatalf("Failed to parse listen address: %s", listen)
 	}
+	if port == "" {
+		port = DefaultPort
+	}
+
 	if !strings.HasPrefix(host, "<") {
-		return []string{fmt.Sprintf("%s:%s", host, port)}
+		return []string{net.JoinHostPort(host, port)}
 	}
 
 	host = strings.TrimPrefix(host, "<")
@@ -125,16 +130,27 @@ func extractAddr(listen string) []string {
 		if err != nil {
 			log.Fatal(err)
 		}
-		if ip.To4() != nil {
-			res = append(res, fmt.Sprintf("%s:%s", ip.String(), port))
-		} else {
-			res = append(res, fmt.Sprintf("[%s]:%s", ip.String(), port))
-		}
+		res = append(res, net.JoinHostPort(ip.String(), port))
 	}
 	return res
 }
 
-func extractCertificate(encCert, encPriv string) tls.Certificate {
+func splitHostPort(hostPort string) (host, port string) {
+	host = hostPort
+
+	colon := strings.LastIndexByte(host, ':')
+	if colon != -1 {
+		host, port = host[:colon], host[colon+1:]
+	}
+
+	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+		host = host[1 : len(host)-1]
+	}
+
+	return
+}
+
+func decodeCertificate(encCert, encPriv string) tls.Certificate {
 	rawCert, err := base64.StdEncoding.DecodeString(encCert)
 	if err != nil {
 		log.Fatalf("Unable to decode certificate: %v", err)

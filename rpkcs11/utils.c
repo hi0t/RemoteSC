@@ -9,7 +9,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#define DEFAULT_PORT "44555"
+#define DEFAULT_PORT "25519"
 #define DEFAULT_GATE "<default>"
 
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))

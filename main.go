@@ -12,8 +12,6 @@ import (
 	"github.com/kardianos/service"
 )
 
-const DefaultPort = "44555"
-
 type program struct{}
 
 func (p *program) Start(s service.Service) error {
@@ -25,7 +23,7 @@ func (p *program) Start(s service.Service) error {
 	}
 	cfg.Address = os.Getenv("REMOTESC_LISTEN")
 	if cfg.Address == "" {
-		cfg.Address = fmt.Sprintf(":%s", DefaultPort)
+		cfg.Address = fmt.Sprintf(":%s", server.DefaultPort)
 	}
 	cfg.Secret = os.Getenv("REMOTESC_SECRET")
 	if cfg.Secret == "" {
@@ -51,7 +49,7 @@ func (p *program) Stop(s service.Service) error {
 
 func main() {
 	installCmd := flag.NewFlagSet("install", flag.ExitOnError)
-	listen := installCmd.String("listen", fmt.Sprintf(":%s", DefaultPort), "Sets the address and port on which the server will accept requests")
+	listen := installCmd.String("listen", fmt.Sprintf(":%s", server.DefaultPort), "Sets the address and port on which the server will accept requests")
 	provider := installCmd.String("provider", "", "Path to the pkcs11 module")
 
 	log.SetFlags(0)
