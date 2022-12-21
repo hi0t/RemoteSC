@@ -1,4 +1,0 @@
-{
-    "cmake.sourceDirectory": "${workspaceFolder}/rpkcs11",
-    "C_Cpp.autoAddFileAssociations": false
-}
