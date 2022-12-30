@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	testAddress    = "127.0.0.1:44555"
+	testAddress    = "127.0.0.1:25519"
 	testLib        = "/usr/lib/softhsm/libsofthsm2.so"
 	testSoftHSMCfg = `
 log.level = INFO
@@ -113,6 +113,7 @@ func prepareServerCfg() Config {
 	var clinetCfg map[string]string
 	json.Unmarshal([]byte(clientStr), &clinetCfg)
 
+	os.Setenv("REMOTESC_ADDR", testAddress)
 	os.Setenv("REMOTESC_FINGERPRINT", clinetCfg["fingerprint"])
 	os.Setenv("REMOTESC_SECRET", clinetCfg["secret"])
 

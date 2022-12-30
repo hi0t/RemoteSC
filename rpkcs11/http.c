@@ -17,7 +17,7 @@ struct curl_resp {
 
 static size_t curl_write_cb(void *contents, size_t size, size_t nmemb, void *userp);
 
-struct http *http_init(const char *addr, const char *fingerprint, const char *shared_secret)
+struct http *http_init(const char *addr, const char *fingerprint)
 {
     char str[1024];
     CURL *curl = curl_easy_init();
@@ -35,8 +35,6 @@ struct http *http_init(const char *addr, const char *fingerprint, const char *sh
     curl_easy_setopt(curl, CURLOPT_PINNEDPUBLICKEY, str);
 
     h->headers = curl_slist_append(NULL, "Content-Type: application/json; charset=utf-8");
-    snprintf(str, sizeof(str), "Authorization: Bearer %s", shared_secret);
-    h->headers = curl_slist_append(h->headers, str);
 
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, h->headers);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_cb);

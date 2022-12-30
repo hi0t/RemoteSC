@@ -15,9 +15,8 @@ import (
 const DefaultPort = "25519"
 
 var (
-	listeners    []*http.Server
-	handler      *messageHandler
-	sharedSecret string
+	listeners []*http.Server
+	handler   *messageHandler
 )
 
 type Config struct {
@@ -29,7 +28,7 @@ type Config struct {
 }
 
 func Start(cfg Config) {
-	handler = NewMessageHandler(cfg.Provider)
+	handler = NewMessageHandler(cfg.Provider, cfg.Secret)
 	if err := handler.Start(); err != nil {
 		log.Fatalf("Failed to start message handler: %v", err)
 	}
@@ -38,7 +37,6 @@ func Start(cfg Config) {
 	mux.HandleFunc("/", processReq)
 
 	addrs := formatAddr(cfg.Address)
-	sharedSecret = cfg.Secret
 	cert := decodeCertificate(cfg.Cert, cfg.Priv)
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{cert},
@@ -63,14 +61,6 @@ func Stop() {
 }
 
 func processReq(w http.ResponseWriter, r *http.Request) {
-	authHeader := r.Header.Get("Authorization")
-	reqToken := strings.TrimPrefix(authHeader, "Bearer")
-	reqToken = strings.TrimSpace(reqToken)
-	if reqToken != sharedSecret {
-		http.Error(w, "access denited", http.StatusForbidden)
-		return
-	}
-
 	if r.Method != "POST" {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -102,9 +92,6 @@ func processReq(w http.ResponseWriter, r *http.Request) {
 
 func formatAddr(listen string) []string {
 	host, port := splitHostPort(listen)
-	if host == "" {
-		log.Fatalf("Failed to parse listen address: %s", listen)
-	}
 	if port == "" {
 		port = DefaultPort
 	}

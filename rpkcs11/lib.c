@@ -19,6 +19,7 @@ CK_RV C_Initialize(CK_VOID_PTR pInitArgs)
     __rsc_dbg = true;
 #endif
     UNUSED(pInitArgs);
+    cJSON *args = NULL;
     CK_RV rv;
 
     struct rsc_config *cfg = parse_config();
@@ -27,13 +28,16 @@ CK_RV C_Initialize(CK_VOID_PTR pInitArgs)
         goto out;
     }
 
-    client = http_init(cfg->addr, cfg->fingerprint, cfg->secret);
+    client = http_init(cfg->addr, cfg->fingerprint);
     if (client == NULL) {
         rv = CKR_FUNCTION_FAILED;
         goto out;
     }
-    rv = INVOKE(NULL, NULL);
+    args = cJSON_CreateArray();
+    cJSON_AddItemToArray(args, cJSON_CreateString(cfg->secret));
+    rv = INVOKE(args, NULL);
 out:
+    cJSON_Delete(args);
     free_config(cfg);
     return rv;
 }

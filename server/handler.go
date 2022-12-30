@@ -28,17 +28,20 @@ type Resp struct {
 }
 
 type messageHandler struct {
-	provider    string
-	currSession string
-	sessKeeper  *time.Timer
-	mu          sync.Mutex
-	p11         *pkcs11_ctx
-	stopping    bool
+	provider     string
+	sharedSecret string
+	currSession  string
+	sessKeeper   *time.Timer
+	mu           sync.Mutex
+	lock         sync.WaitGroup
+	p11          *pkcs11_ctx
+	stopping     bool
 }
 
-func NewMessageHandler(provider string) *messageHandler {
+func NewMessageHandler(provider, sharedSecret string) *messageHandler {
 	return &messageHandler{
-		provider: provider,
+		provider:     provider,
+		sharedSecret: sharedSecret,
 	}
 }
 
@@ -65,6 +68,8 @@ func (h *messageHandler) DispatchCommand(r *Req, sessID string, w http.ResponseW
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
+	h.lock.Wait()
+
 	if h.stopping {
 		panic("stopping state")
 	}
@@ -74,6 +79,20 @@ func (h *messageHandler) DispatchCommand(r *Req, sessID string, w http.ResponseW
 		if h.currSession != "" {
 			return &Resp{Err: CKR_CRYPTOKI_ALREADY_INITIALIZED}
 		}
+
+		var args []string
+		if err := json.Unmarshal(r.Args, &args); err != nil {
+			return &Resp{Err: CKR_FUNCTION_FAILED, ErrDescription: err.Error()}
+		}
+		if len(args) != 1 || args[0] != h.sharedSecret {
+			h.lock.Add(1)
+			go func() {
+				time.Sleep(10 * time.Second)
+				h.lock.Done()
+			}()
+			return &Resp{Err: CKR_FUNCTION_FAILED, ErrDescription: "access denited"}
+		}
+
 		h.currSession = genSessionID()
 		cookie := &http.Cookie{Name: sessionCookie, Value: h.currSession}
 		http.SetCookie(w, cookie)
