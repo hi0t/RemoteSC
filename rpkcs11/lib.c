@@ -18,9 +18,21 @@ CK_RV C_Initialize(CK_VOID_PTR pInitArgs)
 #else
     __rsc_dbg = true;
 #endif
-    UNUSED(pInitArgs);
     cJSON *args = NULL;
     CK_RV rv;
+
+    if (pInitArgs) {
+        CK_C_INITIALIZE_ARGS_PTR pArgs = pInitArgs;
+        if (pArgs->pReserved) {
+            rv = CKR_ARGUMENTS_BAD;
+            goto out;
+        }
+        if (pArgs->flags & CKF_OS_LOCKING_OK) {
+            // TODO add multithread support
+            rv = CKR_CANT_LOCK;
+            goto out;
+        }
+    }
 
     struct rsc_config *cfg = parse_config();
     if (cfg == NULL) {
@@ -33,9 +45,12 @@ CK_RV C_Initialize(CK_VOID_PTR pInitArgs)
         rv = CKR_FUNCTION_FAILED;
         goto out;
     }
+
     args = cJSON_CreateArray();
     cJSON_AddItemToArray(args, cJSON_CreateString(cfg->secret));
-    rv = INVOKE(args, NULL);
+    if ((rv = INVOKE(args, NULL)) != CKR_OK) {
+        goto out;
+    }
 out:
     cJSON_Delete(args);
     free_config(cfg);
@@ -94,37 +109,29 @@ CK_RV C_GetSlotList(CK_BBOOL tokenPresent, CK_SLOT_ID_PTR pSlotList, CK_ULONG_PT
 
     args = cJSON_CreateArray();
     cJSON_AddItemToArray(args, cJSON_CreateBool(tokenPresent));
-    if (pSlotList == NULL) {
-        cJSON_AddItemToArray(args, cJSON_CreateNumber(0));
-    } else {
-        cJSON_AddItemToArray(args, cJSON_CreateNumber(*pulCount));
-    }
 
-    rv = INVOKE(args, &ret);
-
-    if (!cJSON_IsObject(ret)) {
-        rv = CKR_FUNCTION_FAILED;
+    if ((rv = INVOKE(args, &ret)) != CKR_OK) {
         goto out;
     }
 
-    CK_ULONG start_count = *pulCount;
-    FILL_INT_BY_JSON(ret, "cnt", *pulCount);
-
-    if (pSlotList != NULL) {
-        cJSON *list = cJSON_GetObjectItem(ret, "list");
-        cJSON *id;
-        size_t i = 0;
-        cJSON_ArrayForEach(id, list)
-        {
-            if (cJSON_IsNumber(id)) {
-                if (i >= start_count) {
-                    rv = CKR_BUFFER_TOO_SMALL;
-                    goto out;
-                }
-                pSlotList[i++] = id->valuedouble;
+    cJSON *id;
+    CK_ULONG i = 0;
+    cJSON_ArrayForEach(id, ret)
+    {
+        if (pSlotList != NULL) {
+            if (i >= *pulCount) {
+                rv = CKR_BUFFER_TOO_SMALL;
+                goto out;
             }
+            if (!cJSON_IsNumber(id)) {
+                rv = CKR_FUNCTION_FAILED;
+                goto out;
+            }
+            pSlotList[i] = id->valuedouble;
         }
+        i++;
     }
+    *pulCount = i;
 out:
     cJSON_Delete(args);
     cJSON_Delete(ret);

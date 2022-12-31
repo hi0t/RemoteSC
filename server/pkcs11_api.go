@@ -52,25 +52,23 @@ func (c *pkcs11_ctx) GetInfo() (ckInfo, error) {
 	}, unwrapError(rv)
 }
 
-func (c *pkcs11_ctx) GetSlotList(tokenPresent bool, cnt uint) (ckSlotList, error) {
+func (c *pkcs11_ctx) GetSlotList(tokenPresent bool) ([]uint, error) {
 	var pSlotList C.CK_SLOT_ID_PTR
-	ccnt := C.CK_ULONG(cnt)
+	var cnt C.CK_ULONG
 
-	if cnt > 0 {
-		pSlotList = C.CK_SLOT_ID_PTR(C.malloc(C.size_t(cnt) * C.sizeof_CK_SLOT_ID))
+	if rv := C.rsc_GetSlotList(c.ctx, wrapBool(tokenPresent), nil, &cnt); rv != C.CKR_OK {
+		return nil, unwrapError(rv)
 	}
 
-	rv := C.rsc_GetSlotList(c.ctx, wrapBool(tokenPresent), pSlotList, &ccnt)
+	pSlotList = (C.CK_SLOT_ID_PTR)(C.malloc(cnt * C.sizeof_CK_SLOT_ID))
+	rv := C.rsc_GetSlotList(c.ctx, wrapBool(tokenPresent), pSlotList, &cnt)
 
-	res := ckSlotList{Cnt: uint(ccnt)}
-	if pSlotList != nil {
-		res.List = make([]uint, uint(ccnt))
-		ul := unsafe.Slice(pSlotList, uint(ccnt))
-		for i := range ul {
-			res.List[i] = uint(ul[i])
-		}
-		C.free(unsafe.Pointer(pSlotList))
+	res := make([]uint, uint(cnt))
+	ul := unsafe.Slice(pSlotList, uint(cnt))
+	for i := range ul {
+		res[i] = uint(ul[i])
 	}
+	C.free(unsafe.Pointer(pSlotList))
 	return res, unwrapError(rv)
 }
 

@@ -54,6 +54,13 @@ func (s *pkcs11TestSuite) TearDownSuite() {
 	os.RemoveAll(s.tmp)
 }
 
+func (s *pkcs11TestSuite) TestGetSlotList() {
+	list, err := s.ctx.GetSlotList(true)
+	s.NoError(err)
+
+	s.Len(list, 1)
+}
+
 func (s *pkcs11TestSuite) TestGetInfo() {
 	info, err := s.ctx.GetInfo()
 	s.NoError(err)

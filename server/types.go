@@ -40,11 +40,6 @@ type ckInfo struct {
 	LibraryVersion     ckVersion `json:"libraryVersion"`
 }
 
-type ckSlotList struct {
-	List []uint `json:"list"`
-	Cnt  uint   `json:"cnt"`
-}
-
 type ckSlotInfo struct {
 	SlotDescription string    `json:"slotDescription"`
 	ManufacturerID  string    `json:"manufacturerID"`
